@@ -1,0 +1,10 @@
+{
+  "board": "BOARD.md",
+  "holds": "holds.json",
+  "state": "state",
+  "projects": "projects",
+  "agents": "agents",
+  "checkpoints": "checkpoints",
+  "snapshots": "snapshots",
+  "knowledge": "knowledge"
+}

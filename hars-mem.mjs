@@ -242,10 +242,6 @@ function writeResult(commit, result, deadline, head = commit, leaseKey) {
     result.task.lease.active = false;
     result.task.lease.current = false;
   }
-  if (result.packet) {
-    result.ready = Boolean(result.task?.lease?.active);
-    if (!result.ready) delete result.packet;
-  }
   if (deadline === undefined) return { commit, ...result };
   const crossed = now >= deadline;
   return {
@@ -258,7 +254,41 @@ function writeResult(commit, result, deadline, head = commit, leaseKey) {
   };
 }
 
-function publish(message, change) {
+function writeStartResult(commit, result, deadline, head, leaseKey, options) {
+  let liveTask;
+  let leaseKnown = false;
+  let context;
+  if (head) {
+    try {
+      if (storeMarker(readJson, head)?.state !== 'frozen') {
+        const task = taskAt(head, result.task.id);
+        if (task.lease?.key === leaseKey && task.lease.agent === result.task.lease.agent) liveTask = task;
+      }
+      leaseKnown = true;
+    } catch {
+      // The accepted claim is still a receipt when current lease state is unknown.
+    }
+    if (liveTask?.status === 'doing' && active(liveTask.lease)) {
+      try {
+        if (head !== commit) verifyRuntime(head);
+        ready(head, liveTask);
+        context = { canonCommit: head, canon: read(head, 'AGENTS.md'), packet: packetAt(head, liveTask, options) };
+      } catch {
+        // Keep the confirmed lease so the holder can release it or inspect the live task.
+      }
+    }
+  }
+  const receipt = writeResult(commit, { task: liveTask ?? result.task }, deadline);
+  if (!liveTask) {
+    receipt.task.lease.active = leaseKnown ? false : null;
+    receipt.task.lease.current = leaseKnown ? false : null;
+  }
+  if (!head) receipt.leaseTiming = { expiresAt: timestamp(deadline), status: 'readback-unavailable' };
+  const canDispatch = Boolean(context && receipt.task.lease.active);
+  return { ...receipt, observedCommit: head, ready: canDispatch, ...(canDispatch ? context : {}) };
+}
+
+function publish(message, change, startOptions) {
   let base = live();
   for (let attempt = 0; attempt < 5; attempt++) {
     verifyRuntime(base);
@@ -279,9 +309,13 @@ function publish(message, change) {
       // back for the write receipt, then enforce the fence before any retry.
       head = live({ allowFrozen: true });
     } catch (error) {
+      if (startOptions && !pushError) return writeStartResult(commit, result, deadline, null, leaseKey, startOptions);
       throw new Error('Write outcome unknown for commit ' + commit + '. Read origin/main before retrying. ' + error.message);
     }
-    if (ancestor(commit, head)) return writeResult(commit, result, deadline, head, leaseKey);
+    if (ancestor(commit, head)) {
+      return startOptions ? writeStartResult(commit, result, deadline, head, leaseKey, startOptions)
+        : writeResult(commit, result, deadline, head, leaseKey);
+    }
     requireThat(pushError, 'Published commit ' + commit + ' disappeared. Inspect remote history.');
     requireThat(head !== base, 'Write refused by origin. ' + pushError.message);
     requireThat(ancestor(base, head), 'Origin history changed. Inspect both commits before retrying.');
@@ -348,6 +382,8 @@ function claimPath(id, agent, key) {
 }
 
 function claim(id, agent, options, withPacket = false) {
+  requireThat(!withPacket || options.packet === undefined || options.packet === 'minimal',
+    'Use --packet minimal for a handoff with source pointers.');
   const token = randomUUID();
   const key = hash(token);
   const lifetime = ttl(options.ttl);
@@ -358,16 +394,15 @@ function claim(id, agent, options, withPacket = false) {
       const task = taskAt(base, id);
       ready(base, task);
       requireThat(!active(task.lease), 'Live lease held by ' + task.lease?.agent + ' through ' + task.lease?.expiresAt + '.');
-      const packet = withPacket ? { canonCommit: base, canon: read(base, 'AGENTS.md'), packet: packetAt(base, task, options) } : {};
       const now = Date.now();
       const updated = { ...task, rev: task.rev + 1, status: 'doing', updatedAt: timestamp(now),
         lease: { agent, key, claimedAt: timestamp(now), expiresAt: timestamp(now + lifetime) } };
       if (!existsSync(local)) writeLocal(local, { token });
       return {
-        files: taskChange(base, updated), result: { task: publicTask(updated), ...packet },
+        files: taskChange(base, updated), result: { task: publicTask(updated) },
         deadline: now + lifetime, leaseKey: key,
       };
-    });
+    }, withPacket ? options : undefined);
   } catch (error) {
     if (!error.message.startsWith('Write outcome unknown') && existsSync(local)) unlinkSync(local);
     throw error;

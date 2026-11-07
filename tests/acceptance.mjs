@@ -529,6 +529,101 @@ test('custom folders and local search use one live Git source', { timeout: 240_0
   }
 });
 
+test('start dispatch uses the observed main after an accepted claim', { timeout: 120_000 }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'hars-mem-dispatch-'));
+  const origin = path.join(tempRoot, 'origin.git');
+  const seed = path.join(tempRoot, 'seed');
+  const agent = 'dispatch-worker';
+  try {
+    await copyRelease(seed);
+    git(tempRoot, ['init', '--bare', '--initial-branch=main', origin]);
+    const setup = await runProcess(process.execPath, [path.join(seed, 'setup.mjs'), '--local', origin], seed);
+    assert.equal(setup.code, 0, setup.stderr);
+    await createProject(seed);
+    await runCli(seed, 'boot', '--agent', agent, '--role', 'worker', '--scope', 'field-guide',
+      '--capabilities', 'shell,git-read,git-write');
+    for (const slug of ['held', 'blocked', 'prerequisite', 'current', 'unavailable']) {
+      await runCli(seed, 'add', 'field-guide/' + slug, '--agent', agent, '--goal', 'Check the field guide.',
+        '--done-when', 'The current sources were checked.');
+    }
+
+    // Git calls this after accepting the claim ref and before the push returns.
+    const hook = path.join(origin, 'hooks', 'post-receive');
+    const node = process.execPath.replaceAll('\\', '/').replaceAll("'", "'\"'\"'");
+    await writeFile(hook, `#!/bin/sh
+set -e
+read old new ref
+subject=$(git show -s --format=%s "$new")
+case "$subject" in
+  "Claim field-guide/unavailable "*) git update-ref -d "$ref" "$new"; exit ;;
+  "Claim field-guide/held "*|"Claim field-guide/blocked "*|"Claim field-guide/current "*) ;;
+  *) exit 0 ;;
+esac
+export GIT_INDEX_FILE="$PWD/dispatch-probe-index"
+git read-tree "$new"
+write_blob() {
+  blob=$(git hash-object -w --stdin)
+  git update-index --add --cacheinfo "100644,$blob,$1"
+}
+case "$subject" in
+  "Claim field-guide/held "*)
+    printf '%s\\n' '{"holds":[{"target":"field-guide/held","reason":"Owner stopped work"}]}' | write_blob holds.json ;;
+  "Claim field-guide/blocked "*)
+    git show "$new:state/field-guide/blocked.json" | '${node}' -e 'const fs = require("node:fs"); const task = JSON.parse(fs.readFileSync(0)); task.dependsOn = ["field-guide/prerequisite"]; task.rev++; console.log(JSON.stringify(task));' | write_blob state/field-guide/blocked.json ;;
+  "Claim field-guide/current "*)
+    printf '%s\\n' '# Current dispatch canon' | write_blob AGENTS.md
+    printf '%s\\n' 'Current filing instructions.' | write_blob field-notes.md ;;
+esac
+export GIT_AUTHOR_NAME=Owner GIT_AUTHOR_EMAIL=owner@example.invalid GIT_COMMITTER_NAME=Owner GIT_COMMITTER_EMAIL=owner@example.invalid
+next=$(git commit-tree "$(git write-tree)" -p "$new" -m "Owner update during readback")
+git update-ref "$ref" "$next" "$new"
+`, { mode: 0o755 });
+
+    const start = (slug) => runCli(seed, 'start', 'field-guide/' + slug, '--agent', agent);
+    const brief = (slug) => runCli(seed, 'brief', 'field-guide/' + slug);
+    const release = (slug, rev) => runCli(seed, 'release', 'field-guide/' + slug, '--agent', agent, '--if-rev', String(rev));
+
+    for (const slug of ['held', 'blocked']) {
+      const claimed = await start(slug);
+      const current = await brief(slug);
+      assert.equal(git(seed, ['rev-parse', current.commit + '^']), claimed.commit, 'keep the accepted claim receipt');
+      assert.equal(claimed.observedCommit, current.commit);
+      assert.equal(claimed.ready, false);
+      assert.ok(!Object.hasOwn(claimed, 'packet'));
+      assert.ok(!Object.hasOwn(claimed, 'canon'));
+      assert.equal(claimed.task.lease.active, true, 'a dispatch stop must preserve the lease');
+      assert.equal(claimed.task.rev, current.task.rev);
+      if (slug === 'held') assert.equal(current.packet.holds[0].reason, 'Owner stopped work');
+      else assert.deepEqual(current.packet.blockedBy, ['field-guide/prerequisite']);
+      assert.equal((await release(slug, claimed.task.rev)).task.lease, null);
+    }
+
+    const current = await start('current');
+    const observed = await brief('current');
+    assert.equal(current.ready, true);
+    assert.equal(git(seed, ['rev-parse', observed.commit + '^']), current.commit);
+    assert.equal(current.canonCommit, observed.commit);
+    assert.equal(current.canon, '# Current dispatch canon\n');
+    assert.equal(current.packet.revision, observed.task.rev);
+    assert.equal(current.packet.sources[0].commit, observed.commit);
+    assert.equal(current.packet.sources[0].content, 'Current filing instructions.\n');
+
+    const unconfirmed = await start('unavailable');
+    assert.equal(unconfirmed.ready, false);
+    assert.equal(unconfirmed.observedCommit, null);
+    assert.equal(unconfirmed.task.lease.active, null);
+    assert.equal(unconfirmed.leaseTiming.status, 'readback-unavailable');
+    assert.ok(!Object.hasOwn(unconfirmed, 'packet'));
+    git(origin, ['update-ref', 'refs/heads/main', unconfirmed.commit]);
+    assert.equal((await brief('unavailable')).commit, unconfirmed.commit);
+    assert.equal((await release('unavailable', unconfirmed.task.rev)).task.lease, null);
+  } finally {
+    assert.equal(path.dirname(tempRoot), os.tmpdir());
+    assert.ok(path.basename(tempRoot).startsWith('hars-mem-dispatch-'));
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('a store cutover keeps Git history and fences stale checkouts through a failed activation and retry', {
   timeout: 120_000,
 }, async () => {

@@ -5,7 +5,7 @@ import { basename, dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validatePaths } from './layout.mjs';
 import { recall } from './recall.mjs';
-import { mainRef as main, requireActive, storeCommand, storeMarker } from './store.mjs';
+import { mainRef as main, pushMain, requireActive, storeCommand, storeGit, storeMarker, writeOrigin } from './store.mjs';
 
 const remoteMain = 'refs/remotes/origin/main';
 const jsonText = (value) => JSON.stringify(value, null, 2) + '\n';
@@ -34,10 +34,12 @@ function git(args, { input, extraEnv, optional, raw } = {}) {
   throw new Error(message.replace(/(https?:\/\/)[^\s/@]+@/gi, '$1[redacted]@') || 'Git command failed.');
 }
 
-function live({ allowFrozen = false } = {}) {
+function live({ allowFrozen = false, address } = {}) {
   let commit;
   try {
-    git(['fetch', '--no-tags', 'origin', '+' + main + ':' + remoteMain]);
+    const refspec = '+' + main + ':' + remoteMain;
+    if (address) storeGit(git, address, 'fetch', ['--no-tags'], [refspec]);
+    else git(['fetch', '--no-tags', 'origin', refspec]);
     commit = git(['rev-parse', remoteMain]);
   } catch (error) {
     throw new Error('Live origin/main unavailable. State is unknown. ' + error.message);
@@ -203,6 +205,7 @@ function verifyRuntime(commit) {
   for (const [file, actual] of runtimeAtLaunch) {
     requireThat(actual === read(commit, file), 'The running CLI differs from origin/main. Save local edits and run sync from clean main.');
   }
+  pathsAt(commit);
 }
 
 function fastForward(commit) {
@@ -289,17 +292,19 @@ function writeStartResult(commit, result, deadline, head, leaseKey, options) {
 }
 
 function publish(message, change, startOptions) {
-  let base = live();
+  const address = writeOrigin(git);
+  let base = live({ address });
   for (let attempt = 0; attempt < 5; attempt++) {
     verifyRuntime(base);
     const { files, result, deadline, leaseKey } = change(base);
     const commit = makeCommit(base, files, message);
     if (!commit) return writeResult(base, result, deadline);
     let pushError;
+    writeOrigin(git, address);
     requireThat(deadline === undefined || Date.now() < deadline, 'Lease expired before push. Read the live task before retrying.');
     try {
       // The new commit is a direct child of base. The lease requires the remote to still equal base.
-      git(['push', '--force-with-lease=' + main + ':' + base, 'origin', commit + ':' + main]);
+      pushMain(git, address, commit, base);
     } catch (error) {
       pushError = error;
     }
@@ -307,7 +312,7 @@ function publish(message, change, startOptions) {
     try {
       // A cutover may have frozen main just after our successful push. Read it
       // back for the write receipt, then enforce the fence before any retry.
-      head = live({ allowFrozen: true });
+      head = live({ allowFrozen: true, address });
     } catch (error) {
       if (startOptions && !pushError) return writeStartResult(commit, result, deadline, null, leaseKey, startOptions);
       throw new Error('Write outcome unknown for commit ' + commit + '. Read origin/main before retrying. ' + error.message);

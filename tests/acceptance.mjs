@@ -529,6 +529,124 @@ test('custom folders and local search use one live Git source', { timeout: 240_0
   }
 });
 
+test('checkpoint writes reject split Git routing before sending data', { timeout: 120_000 }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'hars-mem-routing-'));
+  const seed = path.join(tempRoot, 'seed');
+  const primary = path.join(tempRoot, 'primary.git');
+  const other = path.join(tempRoot, 'other.git');
+  const agent = 'routing-worker';
+  const remoteHead = (remote) => git(tempRoot, ['--git-dir', remote, 'rev-parse', 'refs/heads/main']);
+  try {
+    await copyRelease(seed);
+    git(tempRoot, ['init', '--bare', '--initial-branch=main', primary]);
+    const setup = await runProcess(process.execPath, [path.join(seed, 'setup.mjs'), '--local', primary], seed);
+    assert.equal(setup.code, 0, setup.stderr);
+    await runCli(seed, 'boot', '--agent', agent, '--role', 'worker', '--scope', 'field-guide',
+      '--capabilities', 'shell,git-read,git-write');
+    await createTask(seed, agent);
+    const claimed = await runCli(seed, 'start', taskId, '--agent', agent);
+    git(tempRoot, ['clone', '--bare', primary, other]);
+    const before = remoteHead(primary);
+    const input = path.join(tempRoot, 'checkpoint.txt');
+    const body = 'Synthetic checkpoint which belongs only to the primary store.';
+    await writeFile(input, body);
+    const blob = git(seed, ['hash-object', input]);
+    const save = ['save', taskId, '--agent', agent, '--if-rev', String(claimed.task.rev), '--file', input];
+    const verifyRefusal = async () => {
+      const rejected = await runCliExpectFailure(seed, ...save);
+      assert.equal(remoteHead(other), before, 'no checkpoint may be sent to the other store');
+      assert.equal(remoteHead(primary), before, 'a rejected write must leave the verified store unchanged');
+      assert.notEqual((await runProcess('git', ['--git-dir', other, 'cat-file', '-e', blob], seed)).code, 0);
+      assert.match(rejected.stderr, /one matching fetch and push endpoint/i);
+    };
+
+    const sourceUrl = git(seed, ['remote', 'get-url', 'origin']);
+    const otherUrl = other.replaceAll('\\', '/');
+    git(seed, ['config', '--add', 'remote.origin.pushurl', otherUrl]);
+    await verifyRefusal();
+    git(seed, ['config', '--add', 'remote.origin.pushurl', sourceUrl]);
+    await verifyRefusal();
+    git(seed, ['config', '--unset-all', 'remote.origin.pushurl']);
+    git(seed, ['config', '--add', `url.${otherUrl}.pushInsteadOf`, sourceUrl]);
+    await verifyRefusal();
+    git(seed, ['config', '--unset-all', `url.${otherUrl}.pushInsteadOf`]);
+
+    const outbox = await runCli(seed, 'outbox');
+    const preserved = JSON.parse(await readFile(path.join(outbox.path, outbox.pending[0]), 'utf8'));
+    assert.equal(Buffer.from(preserved.file.bytes, 'base64').toString('utf8'), body);
+    const alias = './fixture-origin';
+    git(seed, ['remote', 'set-url', 'origin', alias]);
+    git(seed, ['config', '--add', `url.${sourceUrl}.insteadOf`, alias]);
+    git(seed, ['config', '--add', `url.${otherUrl}.pushInsteadOf`, sourceUrl]);
+    assert.equal(git(seed, ['remote', 'get-url', '--push', 'origin']), sourceUrl);
+    const recovered = await runCli(seed, ...save);
+    assert.equal(remoteHead(primary), recovered.commit);
+    assert.equal(remoteHead(other), before);
+    assert.equal(git(primary, ['show', `${recovered.commit}:${recovered.task.checkpoints[0].path}`]), body);
+    assert.notEqual((await runProcess('git', ['--git-dir', other, 'cat-file', '-e', blob], seed)).code, 0);
+
+    const target = path.join(tempRoot, 'bootstrap.git').replaceAll('\\', '/');
+    const redirected = path.join(tempRoot, 'redirected.git').replaceAll('\\', '/');
+    for (const remote of [target, redirected]) git(tempRoot, ['init', '--bare', '--initial-branch=main', remote]);
+    const bootstrap = path.join(tempRoot, 'bootstrap');
+    await copyRelease(bootstrap);
+    git(bootstrap, ['init', '--initial-branch=main']);
+    git(bootstrap, ['config', '--add', `url.${redirected}.pushInsteadOf`, target]);
+    const unsafeSetup = await runProcess(process.execPath, [path.join(bootstrap, 'setup.mjs'), '--local', target], bootstrap);
+    assert.equal(unsafeSetup.code, 1);
+    assert.match(unsafeSetup.stderr, /without a Git fetch or push URL rewrite/i);
+    git(seed, ['remote', 'set-url', 'origin', sourceUrl]);
+    git(seed, ['config', '--unset-all', `url.${otherUrl}.pushInsteadOf`]);
+    git(seed, ['config', '--add', `url.${redirected}.insteadOf`, target]);
+    const unsafeMove = await runCliExpectFailure(seed, 'store', 'migrate', '--to', target, '--from', recovered.commit);
+    assert.match(unsafeMove.stderr, /without a Git fetch or push URL rewrite/i);
+    for (const remote of [target, redirected]) assert.equal(git(tempRoot, ['--git-dir', remote, 'for-each-ref', '--format=%(refname)']), '');
+    assert.equal(remoteHead(primary), recovered.commit, 'destination rewrite rejection must not freeze the source');
+  } finally {
+    assert.equal(path.dirname(tempRoot), os.tmpdir());
+    assert.ok(path.basename(tempRoot).startsWith('hars-mem-routing-'));
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('custom layout cannot overwrite control files or overlap data locations', { timeout: 120_000 }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'hars-mem-path-guard-'));
+  const seed = path.join(tempRoot, 'seed');
+  const origin = path.join(tempRoot, 'origin.git');
+  const agent = 'layout-guard';
+  try {
+    await copyRelease(seed);
+    git(tempRoot, ['init', '--bare', '--initial-branch=main', origin]);
+    const setup = await runProcess(process.execPath, [path.join(seed, 'setup.mjs'), '--local', origin], seed);
+    assert.equal(setup.code, 0, setup.stderr);
+    await runCli(seed, 'boot', '--agent', agent, '--role', 'outer', '--scope', 'all',
+      '--capabilities', 'shell,git-read,git-write');
+    await runCli(seed, 'sync');
+    const paths = JSON.parse(await readFile(path.join(seed, 'paths.json'), 'utf8'));
+    const originalIgnore = git(origin, ['show', 'refs/heads/main:.gitignore']);
+    for (const [changes, error] of [
+      [{ board: '.gitignore' }, /reserved control path/i],
+      [{ board: 'notes/board.md', knowledge: 'notes' }, /configured locations must not overlap/i],
+    ]) {
+      await writeFile(path.join(seed, 'paths.json'), JSON.stringify({ ...paths, ...changes }) + '\n');
+      git(seed, ['add', '--', 'paths.json']);
+      git(seed, ['-c', 'user.name=Fixture Owner', '-c', 'user.email=owner@example.invalid', 'commit', '-m', 'Set a conflicting layout']);
+      git(seed, ['push', 'origin', 'main']);
+      const before = git(origin, ['rev-parse', 'refs/heads/main']);
+      const rejected = await runProcess(process.execPath, [path.join(seed, 'hars-mem.mjs'), 'add', taskId, '--agent', agent,
+        '--goal', taskGoal, '--done-when', taskDoneWhen], seed);
+      assert.equal(git(origin, ['show', 'refs/heads/main:.gitignore']), originalIgnore, 'preserve the original ignore rules');
+      assert.equal(git(origin, ['rev-parse', 'refs/heads/main']), before);
+      assert.equal(rejected.code, 1);
+      assert.match(rejected.stderr, error);
+    }
+  } finally {
+    assert.equal(path.dirname(tempRoot), os.tmpdir());
+    assert.ok(path.basename(tempRoot).startsWith('hars-mem-path-guard-'));
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('start dispatch uses the observed main after an accepted claim', { timeout: 120_000 }, async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'hars-mem-dispatch-'));
   const origin = path.join(tempRoot, 'origin.git');

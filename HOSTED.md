@@ -10,6 +10,8 @@ Run [the onboarding](ONBOARDING.md) and [work loop](WORKFLOW.md) in a checkout t
 
 ## A read-only connector
 
+A host that can fetch an owner-approved source and hand a local file to an authorized writer can supply a [recurring ingestion feed](INGESTION.md#feeder-contract).
+
 To bring selected material into a new private workspace, start with the [owner's first-run review](ONBOARDING.md#bring-over-one-project). Use the [copy-paste export template](ONBOARDING.md#copy-paste-export-template) for one approved conversation or connector source. The owner or their authorized shell operator previews and applies the selected file after checking permissions and readers.
 
 Pass the draft to an authorized shell or the agent currently holding the lease. Use this handoff format.

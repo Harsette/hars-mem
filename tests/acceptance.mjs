@@ -103,6 +103,135 @@ function repoPath(workspace, relativePath) {
   return absolute;
 }
 
+test('recurring ingestion replays selected feeds and verifies private cursor writes', { timeout: 240_000 }, async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), 'hars-mem-ingestion-'));
+  const seed = path.join(temp, 'seed');
+  const origin = path.join(temp, 'owner.git');
+  const feeds = path.join(temp, 'feeds');
+  const alternate = path.join(temp, 'alternate.git');
+  const config = path.join(feeds, 'synthetic-config.json');
+  const schedule = ['run', '--config', config, '--attest', 'owner-reviewed', '--occurrence'];
+  const occurrence = '2020-01-08T22:00:00Z';
+  const head = () => git(temp, ['--git-dir', origin, 'rev-parse', 'main']);
+  const ingest = (...args) => runCli(seed, 'ingest', ...args);
+  const source = (run, name) => run.sources.find((result) => result.source === 'synthetic-' + name);
+  try {
+    await copyRelease(seed);
+    git(temp, ['init', '--bare', '--initial-branch=main', origin]);
+    const setup = await runProcess(process.execPath, [path.join(seed, 'setup.mjs'), '--local', origin], seed);
+    assert.equal(setup.code, 0, setup.stderr);
+    const blank = head();
+    const empty = await ingest('check');
+    assert.equal(empty.commit, blank);
+    const feeder = async (phase) => {
+      const result = await runProcess(process.execPath, [path.join(seed, 'examples', 'ingestion-feed.mjs'),
+        feeds, empty.target, phase, 'with-chat'], seed);
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal(result.stdout.trim(), config);
+    };
+    await feeder('cold');
+    const before = await ingest('check', '--config', config);
+    assert.ok(before.sources.every(({ cursor }) => cursor === null));
+    await mkdir(path.dirname(before.lock), { recursive: true });
+    await writeFile(before.lock, JSON.stringify({ pid: process.pid, occurrence }), { flag: 'wx' });
+    assert.equal((await ingest(...schedule, occurrence)).status, 'overlap');
+    assert.equal(head(), blank);
+    await rm(before.lock);
+    const cold = await ingest(...schedule, occurrence);
+    assert.equal(cold.status, 'attention');
+    assert.equal(source(cold, 'connector').cursor, 'sample-1');
+    assert.equal(source(cold, 'connector').status, 'accepted');
+    assert.equal(source(cold, 'denied').status, 'denied');
+    assert.equal(source(cold, 'denied').cursor, null);
+    assert.equal(source(cold, 'chat').status, 'accepted');
+    const chatReceipt = source(cold, 'chat').receipts[0];
+    const saved = JSON.parse(git(seed, ['show', chatReceipt.commit + ':' + chatReceipt.path]));
+    assert.equal(saved.rawRetained, true);
+    assert.equal(saved.occurrence, '2020-01-08T22:00:00.000Z');
+    const retained = await readdir(path.join(feeds, 'retained'));
+    assert.equal(retained.length, 1);
+    const raw = await readFile(path.join(feeds, 'selected-chat.txt'));
+    assert.deepEqual(await readFile(path.join(feeds, 'retained', retained[0])), raw);
+    const rawHash = spawnSync('git', ['hash-object', '--stdin'], { cwd: seed, encoding: 'utf8', input: raw });
+    assert.equal(rawHash.status, 0);
+    assert.notEqual(spawnSync('git', ['cat-file', '-e', rawHash.stdout.trim()], { cwd: seed }).status, 0);
+    const recall = await runCli(seed, 'recall', 'selected synthetic chat recorded', '--backend', 'git');
+    const note = recall.results.find(({ path }) => path.endsWith('/synthetic-chat/sample-1.json'));
+    assert.ok(note);
+    const record = JSON.parse(git(seed, ['show', recall.commit + ':' + note.path]));
+    assert.equal(record.treatment, 'reference-data');
+    assert.equal(record.provenance.revision, 'sample-1');
+    assert.equal(record.provenance.scope, 'project/field-guide');
+    assert.equal((await runCli(seed, 'board')).tasks.length, 0);
+
+    await feeder('replay');
+    const later = '2020-01-12T22:00:00Z';
+    const replay = await ingest(...schedule, later);
+    assert.deepEqual(source(replay, 'connector').receipts.map(({ cursor }) => cursor), ['sample-2', 'sample-3']);
+    assert.equal(source(replay, 'connector').status, 'backlog');
+    assert.equal(source(replay, 'connector').remaining, 1);
+    assert.equal(source(replay, 'chat').status, 'duplicate');
+    const prePush = head();
+    git(temp, ['clone', '--bare', origin, alternate]);
+    const injector = path.join(temp, 'interrupt-readback.cjs');
+    await writeFile(injector, [
+      "const cp = require('node:child_process');",
+      'const run = cp.spawnSync;',
+      'cp.spawnSync = (command, args, options) => {',
+      '  const result = run(command, args, options);',
+      "  if (command === 'git' && args.includes('push') && result.status === 0) {",
+      "    const changed = run('git', ['config', 'remote.origin.pushurl', " + JSON.stringify(alternate) + ']);',
+      "    if (changed.status !== 0) throw new Error('Synthetic readback interruption failed');",
+      '  }',
+      '  return result;',
+      '};',
+      "require('node:module').syncBuiltinESMExports();",
+    ].join('\n'));
+    const interrupted = await runProcess(process.execPath,
+      ['--require', injector, path.join(seed, 'hars-mem.mjs'), 'ingest', ...schedule, later], seed);
+    assert.equal(interrupted.code, 0, interrupted.stderr);
+    const uncertain = JSON.parse(interrupted.stdout);
+    assert.equal(source(uncertain, 'connector').status, 'uncertain');
+    assert.equal(source(uncertain, 'connector').cursor, 'sample-3');
+    assert.match(source(uncertain, 'connector').reason, /Input preserved/);
+    assert.equal(git(seed, ['rev-parse', 'refs/remotes/origin/main']), prePush);
+    assert.equal(git(temp, ['--git-dir', alternate, 'rev-parse', 'main']), prePush);
+    const accepted = head();
+    assert.notEqual(accepted, prePush);
+    git(seed, ['config', '--unset', 'remote.origin.pushurl']);
+    const recovered = await ingest('check', '--config', config);
+    assert.equal(source(recovered, 'connector').cursor.cursor, 'sample-4');
+    assert.equal((await runCli(seed, 'outbox')).pending.length, 1);
+    assert.equal(source(await ingest(...schedule, later), 'connector').status, 'duplicate');
+    assert.equal(head(), accepted);
+    assert.equal(git(temp, ['--git-dir', origin, 'rev-list', '--count', prePush + '..main']), '1');
+    assert.equal(source(recovered, 'denied').cursor, null);
+
+    const feedPath = path.join(feeds, 'synthetic-connector.json');
+    const gap = JSON.parse(await readFile(feedPath, 'utf8'));
+    gap.batches = [{ ...gap.batches[3], after: 'unknown-parent', cursor: 'sample-5' }];
+    await writeFile(feedPath, JSON.stringify(gap));
+    const failurePath = path.join(feeds, 'synthetic-denied.json');
+    const failed = JSON.parse(await readFile(failurePath, 'utf8'));
+    await writeFile(failurePath, JSON.stringify({ ...failed, status: 'failed', coverage: 'Synthetic feeder unavailable.' }));
+    const incomplete = await ingest(...schedule, later);
+    assert.equal(source(incomplete, 'connector').status, 'gap');
+    assert.equal(source(incomplete, 'denied').status, 'failed');
+    assert.equal(source(incomplete, 'denied').coverage, 'Synthetic feeder unavailable.');
+    assert.equal(source(incomplete, 'chat').status, 'duplicate');
+    assert.equal(head(), accepted);
+
+    git(seed, ['remote', 'set-url', 'origin', 'https://github.com/Harsette/hars-mem.git']);
+    const refused = await runCliExpectFailure(seed, 'ingest', ...schedule, later);
+    assert.match(refused.stderr, /public starter cannot be the private store/);
+    assert.equal(head(), accepted);
+  } finally {
+    assert.equal(path.dirname(temp), os.tmpdir());
+    assert.ok(path.basename(temp).startsWith('hars-mem-ingestion-'));
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
 function assertTaskEnvelope(result, operation) {
   assert.ok(result && typeof result === 'object', `${operation} should return a JSON object`);
   assert.ok(result.task && typeof result.task === 'object', `${operation} should return task state`);

@@ -112,6 +112,8 @@ Use a UTC date you can substantiate, or leave the item out and record the gap in
 
 ## Start or resume an agent
 
+If the owner wants to revisit the same approved sources on a cadence, set up [recurring ingestion](INGESTION.md) after the first private import.
+
 Give the agent the **owner's repository URL or path** and say “Read ONBOARDING.md.” A shell agent with write access clones that repository. Run these commands from the checkout. Choose the agent ID, role, scope, and capabilities that match the runtime.
 
 ~~~sh
@@ -128,6 +130,8 @@ node hars-mem.mjs board
 If the client only has a GitHub connector or browser, follow [the hosted handoff](HOSTED.md). Read the exact main commit, rules, and scoped task. If `.hars-mem-store.json` marks that commit frozen, treat it as historical and ask for the verified active store. Hand an unsaved draft to the authorized writer and check their readback before reporting it saved.
 
 ## Open the first project
+
+Use [Router and Workers](skills/router-and-workers/SKILL.md) to dispatch independent work, [Hars Flags](skills/hars-flags/SKILL.md) to track verified failures, [Skill Creator](skills/skill-creator/SKILL.md) to revise a method, and [HarsBench](skills/harsbench/SKILL.md) to test a material change.
 
 Create a project synthesis and its `SOURCES.json` using [the source map format](ADAPT.md#link-project-sources). Review those files and save them in the owner-selected store. Then file the first task through the [Manager](skills/hars-mem-manager/SKILL.md), which covers claims, checkpoints, inner-repo handoffs, and receipts.
 

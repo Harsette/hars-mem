@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validatePaths } from './layout.mjs';
+import { ingestion } from './ingestion.mjs';
 import { onboarding } from './onboard.mjs';
 import { recall } from './recall.mjs';
 import { mainRef as main, pushMain, requireActive, storeCommand, storeGit, storeMarker, writeOrigin } from './store.mjs';
@@ -15,7 +16,7 @@ const timestamp = (time = Date.now()) => new Date(time).toISOString();
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const endings = ['done', 'cancelled'];
 const inFlight = ['doing', 'blocked', 'waiting'];
-const runtimeFiles = ['hars-mem.mjs', 'layout.mjs', 'onboard.mjs', 'recall.mjs', 'store.mjs'];
+const runtimeFiles = ['hars-mem.mjs', 'ingestion.mjs', 'layout.mjs', 'onboard.mjs', 'recall.mjs', 'store.mjs'];
 const runtimeAtLaunch = new Map(runtimeFiles.map((file) => [
   file, readFileSync(new URL(file, import.meta.url), 'utf8').replace(/\r\n/g, '\n'),
 ]));
@@ -643,9 +644,12 @@ function searchFiles(commit, agent) {
 const commands = {
   help: () => ({ read: ['boot', 'brief', 'board', 'check', 'recall', 'sync', 'outbox'], store: ['check', 'migrate'],
     onboard: ['start', 'status', 'inventory', 'preview', 'apply'],
+    ingest: ['check', 'run'],
     work: ['add', 'start', 'claim', 'heartbeat', 'save', 'release', 'finish', 'settle', 'snapshot', 'rebuild'], guide: 'ONBOARDING.md' }),
   onboard: (action, options) => onboarding(action, options,
     { git, live, verifyRuntime, localPath, writeLocal, publishOnboarding, pending, ancestor, pathsAt, read, readJson }),
+  ingest: (action, options) => ingestion(action, options,
+    { git, live, verifyRuntime, localPath, writeLocal, publishOnboarding, pending, pathsAt, read, readJson }),
   boot: (_, options) => boot(options),
   store: (action, options) => storeCommand(action, options, { git, readJson, verifyRuntime, makeCommit, live }),
   brief: (id, options) => {

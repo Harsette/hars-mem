@@ -68,4 +68,4 @@ An adapter must offer a verifiable canonical revision, consistent reads of rules
 - Use `outbox` to recover pending inputs after a failed write. Check live task revision and lease before retrying. Keep the attempted input and report it unsaved until readback succeeds.
 - Reconcile current holds, blocked work, stale source observations, and missing receipts during the owner's review. Run upkeep on request or at the owner's authorized cadence.
 
-Use [Skill Creator](../skill-creator/SKILL.md) to turn a proven run into a portable skill and [Zero Drift](../zero-drift/SKILL.md) to reconcile stores, sources and recovery copies.
+Use [Router and Workers](../router-and-workers/SKILL.md) to dispatch independent work, [Hars Flags](../hars-flags/SKILL.md) to record verified failures, [Skill Creator](../skill-creator/SKILL.md) to revise a method, and [HarsBench](../harsbench/SKILL.md) to test the change blind. Use [Zero Drift](../zero-drift/SKILL.md) to reconcile stores, sources and recovery copies.

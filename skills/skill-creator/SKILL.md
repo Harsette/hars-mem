@@ -11,6 +11,8 @@ description: Turn a repeatable workflow with evidence into one portable skill, o
 4. Check exact answers first. Verify unique IDs, parseable dates and front matter, source paths and revisions, and hashes where available. Use the smallest suitable model only for an ambiguous comparison. Give it the specific claims and sources. The domain owner resolves authority and approves changes to canon.
 5. Compare the skill against the same task without it. Include a held-out case and a case that should stop or route elsewhere. Save commands, outcomes, and failures. Revise or retire a skill that adds steps without improving the result.
 
+Use [HarsBench](../harsbench/SKILL.md) for a blind comparison. File verified failures through [Hars Flags](../hars-flags/SKILL.md).
+
 ## Portable card convention
 
 This is a Markdown convention for the configured knowledge folder. Validate it in your own workflow. Hars-Mem's built-in `check` compares the board with task records.

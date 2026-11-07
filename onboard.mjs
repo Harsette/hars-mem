@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { closeSync, existsSync, fstatSync, openSync, readFileSync, readdirSync, readSync, realpathSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, openSync, readFileSync, readdirSync, readSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, relative } from 'node:path';
 import { privateOrigin } from './store.mjs';
 
@@ -92,33 +92,42 @@ function contains(parent, child) {
   return !isAbsolute(path) && !/^\.\.(?:[\\/]|$)/.test(path);
 }
 
-function artifact(file, { git }) {
-  requireThat(file, 'Select one local JSON file with --file.');
+function outsideGit(file, { git }) {
+  requireThat(file, 'Select one local file or folder.');
   let path;
   try { path = realpathSync(file); } catch { throw new Error('Choose an existing local JSON file.'); }
   requireThat(!/[\\/]\.git(?:[\\/]|$)/i.test(path) && !/^(?:\\\\|\/\/)/.test(path)
     && !contains(realpathSync(git(['rev-parse', '--show-toplevel'])), path)
-    && git(['-C', dirname(path), 'rev-parse', '--git-dir'], { optional: true }) === null,
+    && git(['-C', statSync(path).isDirectory() ? path : dirname(path), 'rev-parse', '--git-dir'], { optional: true }) === null,
   'Keep the selected artifact in an owner-controlled local folder outside Git.');
+  return path;
+}
+
+function selectedFile(file, dependencies, limit) {
+  const path = outsideGit(file, dependencies);
   let fd;
-  let body;
-  let fingerprint;
   try {
+    requireThat(statSync(path).isFile(), 'Use a regular local file.');
     fd = openSync(path, 'r');
     const stat = fstatSync(fd);
-    requireThat(stat.isFile() && stat.size > 0 && stat.size <= maxBytes, 'Use a small regular JSON file.');
-    const bytes = Buffer.alloc(maxBytes + 1);
+    requireThat(stat.isFile() && stat.size > 0 && stat.size <= limit, 'Use a small regular file.');
+    const bytes = Buffer.alloc(limit + 1);
     let size = 0;
     for (let count; (count = readSync(fd, bytes, size, bytes.length - size, null)) > 0;) size += count;
     requireThat(size === stat.size, 'The selected file changed while it was read.');
-    const content = bytes.subarray(0, size);
-    fingerprint = hash(content);
-    body = new TextDecoder('utf-8', { fatal: true }).decode(content);
+    return bytes.subarray(0, size);
   } catch {
-    throw new Error('Use a readable UTF-8 JSON file up to 128 KiB in an owner-controlled local folder.');
+    throw new Error('Use a readable regular file within the size limit in an owner-controlled local folder.');
   } finally {
     if (fd !== undefined) closeSync(fd);
   }
+}
+
+function artifact(file, dependencies) {
+  const bytes = selectedFile(file, dependencies, maxBytes);
+  let body;
+  try { body = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { throw new Error('Use a UTF-8 JSON file.'); }
+  const fingerprint = hash(bytes);
   return { fingerprint, value: parseJson(body) };
 }
 
@@ -312,3 +321,5 @@ export function onboarding(action, options, dependencies) {
       return { files, result: { approval, paths, status: 'imported' } };
     }, route));
 }
+
+export { artifact, bundle, changes, id, object, outsideGit, scope, selectedFile, text, utc };

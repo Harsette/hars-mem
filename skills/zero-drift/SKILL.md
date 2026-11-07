@@ -27,4 +27,4 @@ Start with the manual commands above. If the owner authorizes a cadence, choose 
 
 An optional runner can use a scheduler to wake a durable ledger. Key each occurrence by schedule ID, policy version, and scheduled UTC instant. Under a compare-and-swap lock, reconcile uncertain runs, list missing occurrences, and apply the owner's skip, coalesce, or bounded replay policy. Limit retries and concurrency. Advance the success watermark after readback. Record every skipped or failed occurrence with its reason and manual recovery command. Keep credentials at the runtime boundary and require destination idempotency before automating an external side effect.
 
-Hars-Mem provides the manual checks and task outbox. The ledger is a contract for an owner-controlled runner. Record which stores, sources and revisions each check covered.
+For approved sources that can replay from a cursor, use the [owner-controlled recurring ingestion runner](../../INGESTION.md). Check each source's coverage and use the outbox when a write outcome is uncertain.

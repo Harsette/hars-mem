@@ -61,6 +61,13 @@ function currentOrigin(git) {
   return { store: endpoint(git, fetchAddress), samePush: fetchAddress === pushAddress };
 }
 
+function requireDirectAddress(git, store) {
+  const rules = git(['config', '--null', '--get-regexp', '^url\\..*\\.(insteadof|pushinsteadof)$'], { optional: true });
+  const prefixes = (rules ?? '').split('\0').filter(Boolean).map((rule) => rule.slice(rule.indexOf('\n') + 1));
+  requireThat(!prefixes.some((prefix) => store.address.startsWith(prefix)),
+    'Use a store address without a Git fetch or push URL rewrite.');
+}
+
 function pushMain(git, address, commit, expected, dryRun = false) {
   git(['push', ...(dryRun ? ['--dry-run'] : []), '--force-with-lease=' + mainRef + ':' + expected,
     '--', address, commit + ':' + mainRef]);
@@ -108,8 +115,9 @@ function migrate(options, { git, readJson, verifyRuntime, makeCommit, live }) {
   requireThat(shaPattern.test(from ?? ''), 'Use --from with the full live main SHA from store check.');
   requireThat(samePush && git(['config', '--get-all', 'remote.origin.pushurl'], { optional: true }) === null,
     'Use a checkout with a single origin URL and no separate push URL.');
-  requireThat(git(['ls-remote', '--get-url', '--', target.address]) === target.address,
-    'Use a destination address without a Git URL rewrite.');
+  requireDirectAddress(git, source);
+  requireDirectAddress(git, target);
+  requireThat(git(['rev-parse', '--is-inside-work-tree']) === 'true', 'Use a regular checkout for migration.');
   requireThat(git(['rev-parse', '--is-shallow-repository']) === 'false', 'Use a full clone for migration.');
   requireThat(git(['worktree', 'list', '--porcelain']).split('\n').filter((line) => line.startsWith('worktree ')).length === 1,
     'Use a standalone clone for migration. Linked worktrees share their origin setting.');

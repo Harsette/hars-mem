@@ -292,6 +292,17 @@ test('cold acceptance: Git-backed canon, claims, checkpoints, recovery, and boar
       assert.ok(Object.hasOwn(coldBrief.packet, field), `handoff packet should expose ${field}`);
     }
     assert.ok(packetText.length > 0, 'handoff packet should be readable by the next worker');
+    const minimal = await runCli(handoffWorkspace, 'brief', taskId, '--packet', 'minimal');
+    assert.equal(minimal.packet.taskId, taskId);
+    assert.equal(minimal.packet.revision, coldTask.rev);
+    assert.equal(minimal.packet.checkpoints[0].path, checkpoint.path);
+    assert.deepEqual(minimal.packet.sources[0], { id: 'field-notes', kind: 'repo', owner: 'guide owner',
+      use: 'Verify the filing rule.', path: 'field-notes.md', commit: minimal.commit });
+    const rejoined = await runCli(cloneA, ...bootArgsA);
+    assert.equal(rejoined.memory.snapshot.content, snapshotAContent);
+    assert.equal(rejoined.memory.snapshot.commit, snapshotA.commit);
+    const scopedRecall = await runCli(cloneA, 'recall', 'acceptance snapshot', '--agent', agentA, '--backend', 'git');
+    assert.deepEqual(scopedRecall.results.map(({ path: found }) => found), [snapshotA.path]);
 
     const handedOffClaim = await runCli(handoffWorkspace, ...claimArgs(handoffAgent));
     assert.equal(assertTaskEnvelope(handedOffClaim, 'handoff claim').lease?.agent, handoffAgent);
@@ -463,6 +474,13 @@ test('custom folders and local search use one live Git source', { timeout: 240_0
     const localRecall = await runCli(clone, 'recall', 'local field guide', '--backend', backend);
     assert.equal(localRecall.backend, sqliteSupported ? 'sqlite' : 'git');
     assert.deepEqual(localRecall.results, gitRecall.results);
+    const brokenIndex = path.join(clone, '.git', 'hars-mem', 'index-' + agent + '.sqlite');
+    await writeFile(brokenIndex, 'Unavailable SQLite cache.');
+    const fallbackRecall = await runCli(clone, 'recall', 'local field guide', '--agent', agent);
+    assert.equal(fallbackRecall.backend, 'git');
+    assert.equal(fallbackRecall.commit, localRecall.commit);
+    assert.deepEqual(fallbackRecall.results, gitRecall.results);
+    await rm(brokenIndex);
 
     const draft = path.join(tempRoot, 'working.md');
     await writeFile(draft, 'Portable field guide recipe with repeatable steps.');
@@ -507,6 +525,101 @@ test('custom folders and local search use one live Git source', { timeout: 240_0
     assert.equal(lateSave.task.lease.active, false);
     assert.ok(lateSave.task.checkpoints[0].path);
   } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('a store cutover keeps Git history and fences stale checkouts through a failed activation and retry', {
+  timeout: 120_000,
+}, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'hars-mem-cutover-'));
+  const seed = path.join(tempRoot, 'seed');
+  const peer = path.join(tempRoot, 'old-checkout');
+  const fresh = path.join(tempRoot, 'fresh-checkout');
+  const source = path.join(tempRoot, 'source.git');
+  const destination = path.join(tempRoot, 'target with space.git');
+  const occupied = path.join(tempRoot, 'occupied.git');
+  const offline = source + '.offline';
+  const agent = 'cutover-owner';
+  try {
+    await copyRelease(seed);
+    for (const remote of [source, destination, occupied]) {
+      git(tempRoot, ['init', '--bare', '--initial-branch=main', remote]);
+    }
+    const setup = await runProcess(process.execPath, [path.join(seed, 'setup.mjs'), '--local', source], seed);
+    assert.equal(setup.code, 0, setup.stderr);
+    const empty = await runCli(seed, 'store', 'check');
+    assert.equal(empty.store, 'local-bare-git');
+    assert.equal(empty.readable, true);
+    assert.equal(empty.pushNegotiation, 'accepted-dry-run');
+    assert.deepEqual((await runCli(seed, 'board')).tasks, []);
+
+    await runCli(seed, 'boot', '--agent', agent, '--role', 'outer', '--scope', 'all',
+      '--capabilities', 'shell,git-read,git-write');
+    await createTask(seed, agent);
+    await runCli(seed, 'start', taskId, '--agent', agent);
+    const draft = path.join(tempRoot, 'draft.md');
+    await writeFile(draft, 'A draft that must survive storage migration.\n');
+    const saved = await runCli(seed, 'save', taskId, '--agent', agent, '--file', draft);
+    const checkpoint = saved.task.checkpoints[0].path;
+    const snapshot = await runCli(seed, 'snapshot', '--agent', agent, '--file', draft);
+    const from = snapshot.commit;
+    git(tempRoot, ['clone', '--branch', 'main', source, peer]);
+    git(seed, ['push', occupied, from + ':refs/heads/main']);
+
+    const migrate = (target, sha = from) => ['store', 'migrate', '--to', target, '--from', sha];
+    assert.match((await runCliExpectFailure(seed, ...migrate(destination, empty.commit))).stderr, /source advanced/i);
+    assert.match((await runCliExpectFailure(seed, ...migrate(occupied))).stderr, /already has Git refs/i);
+    assert.equal((await runCli(seed, 'store', 'check')).commit, from);
+
+    const hook = path.join(destination, 'hooks', 'pre-receive');
+    await writeFile(hook, '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    assert.match((await runCliExpectFailure(seed, ...migrate(destination))).stderr, /destination activation/i);
+    assert.equal(git(destination, ['ls-remote', '--refs', destination]), '');
+    const frozen = await runCli(peer, 'store', 'check');
+    assert.equal(frozen.state, 'frozen');
+    assert.match((await runCliExpectFailure(seed, ...migrate(occupied))).stderr, /original destination/i);
+    assert.match((await runCliExpectFailure(peer, 'board')).stderr, /frozen for migration/i);
+
+    await rename(source, offline);
+    try {
+      assert.match((await runCliExpectFailure(peer, 'brief', taskId)).stderr, /state is unknown/i);
+      const historical = await runCli(peer, 'brief', taskId, '--as-of', from);
+      assert.equal(historical.provenance.mode, 'as-of');
+      assert.equal(historical.task.lease.active, null);
+      assert.equal(historical.task.checkpoints[0].path, checkpoint);
+      assert.equal((await runCli(peer, 'check', '--as-of', from)).board, 'matches-as-of');
+      const oldRecall = await runCli(peer, 'recall', 'survive storage migration', '--as-of', from, '--backend', 'git');
+      assert.equal(oldRecall.provenance.current, false);
+      assert.equal(oldRecall.results[0].path, snapshot.path);
+      assert.match((await runCliExpectFailure(peer, 'start', taskId, '--agent', agent, '--as-of', from)).stderr, /historical reads/i);
+    } finally {
+      await rename(offline, source);
+    }
+
+    await rm(hook);
+    const switched = await runCli(seed, ...migrate(destination));
+    assert.equal(switched.frozen, frozen.commit);
+    assert.equal(switched.from, from);
+    assert.equal(switched.switched, true);
+    assert.equal(git(seed, ['rev-parse', switched.commit + '^^']), from);
+    assert.equal(git(seed, ['diff', '--name-only', from, switched.commit]), '.hars-mem-store.json');
+    assert.equal((await runCli(seed, ...migrate(destination))).commit, switched.commit);
+    assert.equal((await runCli(seed, 'board')).tasks[0].lease.active, true);
+    assert.match((await runCliExpectFailure(peer, 'add', 'field-guide/stale', '--agent', agent, '--goal', 'Stale',
+      '--done-when', 'Refuse this write')).stderr, /frozen for migration/i);
+    assert.equal(git(peer, ['ls-remote', source, 'refs/heads/main']).split('\t')[0], frozen.commit);
+
+    const finished = await runCli(seed, 'finish', taskId, '--agent', agent, '--if-rev', String(saved.task.rev), '--receipt', checkpoint);
+    git(tempRoot, ['clone', '--branch', 'main', destination, fresh]);
+    const brief = await runCli(fresh, 'brief', taskId);
+    assert.equal(brief.commit, finished.commit);
+    assert.equal(brief.task.receipt.value, checkpoint);
+    assert.equal(git(fresh, ['show', `${brief.commit}:${checkpoint}`]), 'A draft that must survive storage migration.');
+    assert.equal((await runCli(fresh, 'store', 'check')).state, 'active');
+  } finally {
+    assert.equal(path.dirname(tempRoot), os.tmpdir());
+    assert.ok(path.basename(tempRoot).startsWith('hars-mem-cutover-'));
     await rm(tempRoot, { recursive: true, force: true });
   }
 });

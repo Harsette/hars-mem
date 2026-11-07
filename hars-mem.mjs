@@ -312,15 +312,16 @@ function boot(options) {
       agent, role: options.role, scope, capabilities,
       snapshot: paths.snapshots + '/' + agent + '/LATEST.md', canonBlob: git(['rev-parse', base + ':AGENTS.md']),
     };
-    const previous = readJson(base, agentPath(paths, agent), true);
-    const portable = previous?.scope === scope ? read(base, registration.snapshot, true) : null;
+    const snapshotCommit = git(['log', '-1', '--format=%H', base, '--', registration.snapshot]);
+    const snapshotScope = snapshotCommit ? readJson(snapshotCommit, agentPath(pathsAt(snapshotCommit), agent), true)?.scope : null;
+    const portable = snapshotScope === scope ? read(base, registration.snapshot, true) : null;
     return {
       files: { [agentPath(paths, agent)]: jsonText(registration) },
       result: { canonCommit: base, canon, task: publicTask(task), registration, registrationPath: agentPath(paths, agent),
         memory: {
           reviewRequired: Boolean(memory),
           instruction: memory ? 'Check shared claims against live canon and keep unrelated harness craft.' : null,
-          snapshot: portable === null ? null : { path: registration.snapshot, commit: base, content: portable },
+          snapshot: portable === null ? null : { path: registration.snapshot, commit: snapshotCommit, content: portable },
         } },
     };
   });
@@ -527,6 +528,7 @@ function searchFiles(commit, agent) {
     }
   }
   return [...documents].sort()
+    .filter((path) => !agent || !path.startsWith(paths.snapshots + '/') || path.startsWith(paths.snapshots + '/' + agent + '/'))
     .filter((path) => /\.(md|json|txt)$/i.test(path))
     .map((path) => ({ path, body: read(commit, path, true) }))
     .filter((document) => document.body !== null);
@@ -554,8 +556,10 @@ const commands = {
     const source = readSource(options);
     const { commit } = source;
     const paths = pathsAt(commit);
-    requireThat(read(commit, paths.board) === boardFor(tasksAt(commit), paths), 'Board is stale. Run rebuild.');
-    return { ...source, board: 'current' };
+    const historical = source.provenance.mode === 'as-of';
+    requireThat(read(commit, paths.board) === boardFor(tasksAt(commit), paths),
+      historical ? 'Board differs from the task records at this commit.' : 'Board is stale. Run rebuild.');
+    return { ...source, board: historical ? 'matches-as-of' : 'current' };
   },
   recall: async (query, options) => {
     const text = required(query, 'Provide a search phrase.');

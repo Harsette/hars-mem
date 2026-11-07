@@ -15,7 +15,7 @@ function requireThat(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-function git(args, optional = false) {
+function git(args, { optional = false } = {}) {
   const result = spawnSync('git', args, { encoding: 'utf8', windowsHide: true, timeout: 30000,
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never' } });
   if (result.status === 0) return result.stdout.trim();
@@ -26,17 +26,17 @@ function git(args, optional = false) {
 try {
   const localSetup = first === '--local';
   requireThat(process.argv.length === (localSetup ? 4 : 3), usage);
-  const store = endpoint((args, { optional } = {}) => git(args, optional), localSetup ? local : first);
+  const store = endpoint(git, localSetup ? local : first);
   requireThat(store.type === (localSetup ? 'local-bare-git' : 'github'), usage);
   const url = store.address;
   requireThat(releasePaths.every((path) => existsSync(path)), 'Open a terminal in the Hars-Mem folder.');
   const paths = validatePaths(JSON.parse(readFileSync('paths.json', 'utf8')));
   if (!existsSync('.git')) git(['init', '-b', 'main']);
-  requireThat(git(['symbolic-ref', '--short', 'HEAD'], true) === 'main', 'Setup needs local main.');
-  const origin = git(['remote', 'get-url', 'origin'], true);
-  requireThat(!origin || endpoint((args, { optional } = {}) => git(args, optional), origin).identity === store.identity,
+  requireThat(git(['symbolic-ref', '--short', 'HEAD'], { optional: true }) === 'main', 'Setup needs local main.');
+  const origin = git(['remote', 'get-url', 'origin'], { optional: true });
+  requireThat(!origin || endpoint(git, origin).identity === store.identity,
     'This folder already has a different origin. Extract a fresh copy.');
-  if (!git(['rev-parse', '--verify', 'HEAD'], true)) {
+  if (!git(['rev-parse', '--verify', 'HEAD'], { optional: true })) {
     const data = ['tests', ...Object.values(paths)].filter((path) => existsSync(path));
     git(['add', '--', ...releasePaths, ...data]);
     git(['-c', 'user.name=Hars-Mem', '-c', 'user.email=hars-mem@users.noreply.example',

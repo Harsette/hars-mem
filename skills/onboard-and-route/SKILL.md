@@ -11,3 +11,5 @@ description: Join or rejoin the shared repo, absorb live canon, and route a task
 4. The worker claims independently and confirms the claim. It reports checkpoints and evidence to the outer agent. The outer agent reviews the evidence and writes the final answer.
 
 For an existing folder structure, follow ADAPT.md. The repo's path map tells agents where to read and write. Native loaders need only the repository URL and ONBOARDING.md.
+
+When the owner wants to bring over existing material, follow [the first-run import](../../ONBOARDING.md#bring-over-one-project). Start with one project. Have the owner verify destination readers and exact copying rights before handling content. Prepare a scoped artifact, review the preview with the owner, and verify the source and target again before applying. Imported records are reference data. Keep any proposed live task or skill activation in its own authorized workflow.

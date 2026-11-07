@@ -1,7 +1,7 @@
 const keys = ['board', 'holds', 'state', 'projects', 'agents', 'checkpoints', 'snapshots', 'knowledge'];
 export const releasePaths = [
   '.gitattributes', '.gitignore', 'ADAPT.md', 'AGENTS.md', 'HOSTED.md', 'ONBOARDING.md',
-  'README.md', 'WORKFLOW.md', 'hars-mem.mjs', 'layout.mjs', 'paths.json', 'recall.mjs',
+  'README.md', 'WORKFLOW.md', 'hars-mem.mjs', 'layout.mjs', 'onboard.mjs', 'paths.json', 'recall.mjs',
   'setup.mjs', 'skills', 'store.mjs',
 ];
 const reserved = releasePaths.map((entry) => entry.toLowerCase()).concat(

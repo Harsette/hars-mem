@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { releasePaths, validatePaths } from './layout.mjs';
-import { endpoint, mainRef as branch, pushMain, requireDirectAddress, storeGit, writeOrigin } from './store.mjs';
+import { endpoint, mainRef as branch, privateStore, pushMain, storeGit, writeOrigin } from './store.mjs';
 
 const [first, local] = process.argv.slice(2);
 const usage = 'Run node setup.mjs GITHUB_URL or node setup.mjs --local ABSOLUTE_BARE_GIT_PATH from the Hars-Mem folder.';
@@ -23,13 +23,19 @@ try {
   requireThat(process.argv.length === (localSetup ? 4 : 3), usage);
   const store = endpoint(git, localSetup ? local : first);
   requireThat(store.type === (localSetup ? 'local-bare-git' : 'github'), usage);
+  const targetIdentity = privateStore(git, store);
   const url = store.address;
   requireThat(releasePaths.every((path) => existsSync(path)), 'Open a terminal in the Hars-Mem folder.');
   const paths = validatePaths(JSON.parse(readFileSync('paths.json', 'utf8')));
   if (!existsSync('.git')) git(['init', '-b', 'main']);
   requireThat(git(['symbolic-ref', '--short', 'HEAD'], { optional: true }) === 'main', 'Setup needs local main.');
-  requireDirectAddress(git, store);
-  const origin = git(['remote']).split('\n').some((name) => name.trim() === 'origin') ? writeOrigin(git) : null;
+  const origin = git(['config', '--get-all', 'remote.origin.url'], { optional: true });
+  if (origin !== null) {
+    requireThat(origin && !origin.includes('\n')
+      && git(['config', '--get-all', 'remote.origin.pushurl'], { optional: true }) === null,
+    'Setup needs one origin URL and no separate push URL.');
+    writeOrigin(git, origin);
+  }
   requireThat(!origin || endpoint(git, origin).identity === store.identity,
     'This folder already has a different origin. Extract a fresh copy.');
   if (!git(['rev-parse', '--verify', 'HEAD'], { optional: true })) {
@@ -45,6 +51,7 @@ try {
   requireThat(!refs || refs.split('\n').includes(expected), 'The destination already has content. Choose a new empty private repository.');
   if (!refs) {
     if (origin) writeOrigin(git, origin);
+    requireThat(privateStore(git, store) === targetIdentity, 'Destination changed before setup push.');
     pushMain(git, url, head, '');
   }
   requireThat(storeGit(git, url, 'ls-remote', ['--refs'], [branch]) === expected, 'Readback did not match. Inspect destination main.');

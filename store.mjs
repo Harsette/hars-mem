@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { realpathSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { realpathSync, statSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -77,13 +78,52 @@ export function requireDirectAddress(git, store) {
     'Use a store address without a Git fetch or push URL rewrite.');
 }
 
+export function privateStore(git, store) {
+  requireDirectAddress(git, store);
+  if (store.type === 'local-bare-git') {
+    requireThat(!store.address.startsWith('//'), 'Use a local bare Git store on an owner-controlled filesystem.');
+    const stat = statSync(store.address, { bigint: true });
+    return [store.identity, stat.dev, stat.ino, stat.birthtimeNs].join(':');
+  }
+  const slug = store.identity.slice('github:'.length);
+  requireThat(slug !== 'harsette/hars-mem', 'The public starter cannot be the private store.');
+  requireThat(/^https:\/\/github\.com\//i.test(store.address),
+    'Use a direct GitHub HTTPS URL for private setup, onboarding, or migration.');
+  const response = spawnSync('gh', ['api', '--hostname', 'github.com', '--method', 'GET',
+    '--header', 'Accept: application/vnd.github+json', 'repos/' + slug], {
+    encoding: 'utf8', windowsHide: true, timeout: 15000, maxBuffer: 1024 * 1024,
+    env: { ...process.env, GH_PROMPT_DISABLED: '1', GH_DEBUG: '' },
+  });
+  let repo;
+  if (response.status === 0) {
+    try { repo = JSON.parse(response.stdout); } catch { /* Treat malformed metadata as unverified. */ }
+  }
+  requireThat(typeof repo?.full_name === 'string' && repo.full_name.toLowerCase() === slug
+    && Number.isSafeInteger(repo.id) && repo.id > 0,
+    'GitHub could not verify this repository. Use an already authorized GitHub CLI session or choose local bare Git.');
+  requireThat(repo.private === true && repo.visibility === 'private', 'Choose a private GitHub repository.');
+  return store.identity + ':' + repo.id;
+}
+
+export function privateOrigin(git) {
+  const address = git(['config', '--get-all', 'remote.origin.url'], { optional: true });
+  requireThat(address && !address.includes('\n')
+    && git(['config', '--get-all', 'remote.origin.pushurl'], { optional: true }) === null,
+  'Onboarding needs one origin URL and no separate push URL.');
+  writeOrigin(git, address);
+  const store = endpoint(git, address);
+  requireDirectAddress(git, { address });
+  return { address: store.address, identity: store.identity, fingerprint: privateStore(git, store) };
+}
+
 export function storeGit(git, address, command, flags = [], refspecs = []) {
   requireThat(address && !/[\r\n]/.test(address) && (!address.includes('=') || isAbsolute(address)),
     'Use a Git store address that can be pinned safely.');
   const url = address.includes('=') ? pathToFileURL(address).href.replaceAll('=', '%3D') : address;
   const route = './.hars-mem-route-' + randomUUID();
   // The unique full match pins this process to the resolved address. Git applies URL rewrites once.
-  return git(['-c', 'url.' + url + '.insteadOf=' + route, '-c', 'url.' + url + '.pushInsteadOf=' + route,
+  return git(['-c', 'http.followRedirects=false', '-c', 'url.' + url + '.insteadOf=' + route,
+    '-c', 'url.' + url + '.pushInsteadOf=' + route,
     command, ...flags, '--', route, ...refspecs]);
 }
 
@@ -137,7 +177,7 @@ function migrate(options, { git, readJson, verifyRuntime, makeCommit, live }) {
   requireThat(git(['config', '--get-all', 'remote.origin.pushurl'], { optional: true }) === null,
     'Use a checkout with a single origin URL and no separate push URL.');
   requireDirectAddress(git, source);
-  requireDirectAddress(git, target);
+  const targetIdentity = privateStore(git, target);
   requireThat(git(['rev-parse', '--is-inside-work-tree']) === 'true', 'Use a regular checkout for migration.');
   requireThat(git(['rev-parse', '--is-shallow-repository']) === 'false', 'Use a full clone for migration.');
   requireThat(git(['worktree', 'list', '--porcelain']).split('\n').filter((line) => line.startsWith('worktree ')).length === 1,
@@ -169,6 +209,7 @@ function migrate(options, { git, readJson, verifyRuntime, makeCommit, live }) {
     [storePath]: JSON.stringify({ version: 1, state: 'frozen', from, to }, null, 2) + '\n',
   }, 'Freeze Hars-Mem source for migration');
   if (frozen !== head) {
+    requireThat(privateStore(git, target) === targetIdentity, 'Destination changed before the migration freeze.');
     writeOrigin(git, origin);
     requireThat(setMain(git, source.address, frozen, from, 'Source freeze') === frozen,
       'The frozen source advanced. Inspect both stores before retrying.');
@@ -176,6 +217,7 @@ function migrate(options, { git, readJson, verifyRuntime, makeCommit, live }) {
 
   let commit = targetHead;
   if (!commit) {
+    requireThat(privateStore(git, target) === targetIdentity, 'Destination changed before activation. Keep the original recovery route.');
     const activation = makeCommit(frozen, {
       [storePath]: JSON.stringify({ version: 1, state: 'active', from, to, frozen }, null, 2) + '\n',
     }, 'Activate migrated Hars-Mem source');

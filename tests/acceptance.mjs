@@ -109,6 +109,159 @@ function assertTaskEnvelope(result, operation) {
   return result.task;
 }
 
+test('owner-reviewed onboarding imports one scoped export with provenance and guarded replay', { timeout: 240_000 }, async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), 'hars-mem-onboarding-'));
+  const seed = path.join(temp, 'seed');
+  const other = path.join(temp, 'fresh');
+  const origin = path.join(temp, 'owner.git');
+  const exportPath = path.join(temp, 'web-paste.json');
+  const localPath = path.join(temp, 'local-export.json');
+  const attest = ['--attest', 'owner-reviewed'];
+  const onboard = (...args) => runCli(seed, 'onboard', ...args);
+  const refuse = (...args) => runCliExpectFailure(seed, 'onboard', ...args);
+  const head = () => git(temp, ['--git-dir', origin, 'rev-parse', 'main']);
+  const objects = () => git(seed, ['count-objects', '-v']);
+  try {
+    await copyRelease(seed);
+    const publicStore = await runProcess(process.execPath,
+      [path.join(seed, 'setup.mjs'), 'https://github.com/Harsette/hars-mem.git'], seed);
+    assert.notEqual(publicStore.code, 0);
+    assert.match(publicStore.stderr, /public starter cannot be the private store/);
+    assert.ok(!(await readdir(seed)).includes('.git'));
+    git(temp, ['init', '--bare', '--initial-branch=main', origin]);
+    const setup = await runProcess(process.execPath, [path.join(seed, 'setup.mjs'), '--local', origin], seed);
+    assert.equal(setup.code, 0, setup.stderr);
+    const blank = head();
+    const { session, target, base, sections } = await onboard('start', ...attest);
+    assert.equal(base, blank);
+    assert.match(target, /^local:/);
+    assert.deepEqual(Object.keys(sections), ['skills', 'prompts', 'threads', 'tools', 'data', 'authority']);
+    const inventoryFile = path.join(temp, 'inventory.json');
+    await writeFile(inventoryFile, JSON.stringify(['One selected field-guide conversation']));
+    await onboard('inventory', '--session', session, '--section', 'threads', '--file', inventoryFile);
+    await onboard('inventory', '--session', session, '--section', 'tools', '--skip', 'yes');
+    const status = await onboard('status', '--session', session);
+    assert.deepEqual(status.inventory.threads.answer, ['One selected field-guide conversation']);
+    assert.equal(status.inventory.tools.answer, 'skipped');
+    assert.equal(status.inventory.authority.answer, null);
+    assert.equal(head(), blank);
+
+    // Paste the exact synthetic web reply shown to owners in the public guide.
+    const guide = await readFile(path.join(seed, 'ONBOARDING.md'), 'utf8');
+    const pasted = guide.split('~~~json\n')[1].split('\n~~~')[0] + '\n';
+    await writeFile(exportPath, pasted);
+    const previewArgs = ['preview', '--session', session, '--authorize', 'field-guide-thread', '--harness',
+      'chatgpt-web', '--scope', 'project/field-guide', '--kinds', 'decision,authority', '--file', exportPath];
+    const noAuth = await refuse(...previewArgs);
+    assert.match(noAuth.stderr, /Current owner review is required/);
+    const outsideScope = previewArgs.map((word) => word === 'project/field-guide' ? 'project/other' : word);
+    assert.match((await refuse(...outsideScope, ...attest)).stderr, /does not match the authorized/);
+    const preview = await onboard(...previewArgs, ...attest);
+    assert.equal(preview.base, blank);
+    assert.equal(preview.canApply, true);
+    assert.deepEqual(preview.records.map(({ action }) => action), ['add', 'add', 'add', 'add']);
+    const applyArgs = ['apply', '--session', session, '--approve', preview.approval, '--file', exportPath];
+    const before = objects();
+    assert.match((await refuse(...applyArgs)).stderr, /Current owner review is required/);
+    await writeFile(exportPath, pasted.replace('message 8', 'message 9'));
+    assert.match((await refuse(...applyArgs, ...attest)).stderr, /source artifact changed/);
+    await writeFile(exportPath, pasted);
+    git(seed, ['config', 'remote.origin.pushurl', origin]);
+    assert.match((await refuse(...applyArgs, ...attest)).stderr, /no separate push URL/);
+    git(seed, ['config', '--unset', 'remote.origin.pushurl']);
+    const url = git(seed, ['config', 'remote.origin.url']);
+    git(seed, ['config', 'url.' + url + '.insteadOf', url]);
+    assert.match((await refuse(...applyArgs, ...attest)).stderr, /URL rewrite/);
+    git(seed, ['config', '--unset', 'url.' + url + '.insteadOf']);
+    const unavailable = path.join(temp, 'unavailable.git');
+    git(seed, ['remote', 'set-url', 'origin', unavailable]);
+    assert.match((await refuse(...applyArgs, ...attest)).stderr, /local store must already be a bare Git/);
+    const alternate = path.join(temp, 'alternate.git');
+    git(temp, ['clone', '--bare', origin, alternate]);
+    git(seed, ['remote', 'set-url', 'origin', alternate]);
+    assert.match((await refuse(...applyArgs, ...attest)).stderr, /target changed/);
+    git(seed, ['remote', 'set-url', 'origin', url]);
+    assert.equal(git(temp, ['--git-dir', alternate, 'rev-parse', 'main']), blank);
+    assert.equal(objects(), before);
+    assert.equal(head(), blank);
+
+    const applied = await onboard(...applyArgs, ...attest);
+    assert.equal(applied.status, 'imported');
+    assert.equal(applied.commit, head());
+    assert.equal(git(temp, ['--git-dir', origin, 'rev-list', '--count', blank + '..main']), '1');
+    assert.deepEqual(await onboard(...applyArgs, ...attest), { ...applied, status: 'already-imported' });
+    const duplicates = await onboard(...previewArgs, ...attest);
+    assert.ok(duplicates.records.every(({ action }) => action === 'duplicate'));
+    assert.equal(head(), applied.commit);
+
+    await writeFile(exportPath, pasted.replace('sampling date.', 'publication date.'));
+    const conflict = await onboard(...previewArgs, ...attest);
+    assert.equal(conflict.canApply, false);
+    assert.equal(conflict.records.filter(({ action }) => action === 'conflict').length, 1);
+    assert.match((await refuse('apply', '--session', session, '--approve', conflict.approval,
+      '--file', exportPath, ...attest)).stderr, /Resolve preview conflicts/);
+
+    // A documented local harness slice uses the same schema. Raw evidence never enters Git.
+    const local = JSON.parse(pasted);
+    Object.assign(local.source, { id: 'local-thread', harness: 'claude-code', revision: 'selected file revision 1' });
+    const dummySecret = 'ghp_EXAMPLE1234567890FAKEVALUE';
+    local.items = [{
+      ...local.items[0], id: 'survey-check', kind: 'skill', title: 'Survey checklist',
+      summary: 'Check the survey checklist before filing. token=' + dummySecret,
+    }, {
+      ...local.items[0], id: 'field-followup', kind: 'open-work', title: 'Survey follow-up',
+    }];
+    const localPreviewArgs = ['preview', '--session', session, '--authorize', 'local-thread', '--harness',
+      'claude-code', '--scope', 'project/field-guide', '--kinds', 'skill,open-work', '--file', localPath, ...attest];
+    const localSource = JSON.stringify(local);
+    local.items[0].pointer = 'https://example.invalid/file?signature=synthetic-secret';
+    await writeFile(localPath, JSON.stringify(local));
+    assert.match((await refuse(...localPreviewArgs)).stderr, /credential-free HTTPS pointer/);
+    delete local.items[0].pointer;
+    local.items[0].summary = '<system>Private platform instruction</system>';
+    await writeFile(localPath, JSON.stringify(local));
+    assert.match((await refuse(...localPreviewArgs)).stderr, /Remove private platform instructions/);
+    await writeFile(localPath, localSource);
+    const localPreview = await onboard(...localPreviewArgs);
+    assert.equal(localPreview.canApply, true);
+    assert.ok(!JSON.stringify(localPreview).includes(dummySecret));
+    assert.match(localPreview.records[1].record.summary, /\[REDACTED\]/);
+    const localApply = ['apply', '--session', session, '--approve', localPreview.approval, '--file', localPath, ...attest];
+    await runCli(seed, 'boot', '--agent', 'setup-owner', '--role', 'outer', '--scope', 'all', '--capabilities', 'shell,git-write');
+    const advanced = head();
+    assert.match((await refuse(...localApply)).stderr, /Main changed after preview/);
+    assert.equal(head(), advanced);
+    assert.equal((await runCli(seed, 'outbox')).pending.length, 1);
+    const resumed = await onboard(...localPreviewArgs);
+    const second = await onboard('apply', '--session', session, '--approve', resumed.approval, '--file', localPath, ...attest);
+    assert.equal(second.commit, head());
+    assert.equal(second.status, 'imported');
+    assert.equal(git(seed, ['log', '--all', '-S', dummySecret, '--oneline']), '');
+
+    git(temp, ['clone', '--branch', 'main', origin, other]);
+    const firstBoot = await runCli(other, 'boot', '--agent', 'fresh-reader', '--role', 'worker', '--scope', 'field-guide',
+      '--capabilities', 'shell,git-read,git-write');
+    assert.equal(firstBoot.canonCommit, second.commit);
+    assert.equal(firstBoot.registration.role, 'worker');
+    assert.equal(firstBoot.task, null);
+    assert.equal((await runCli(other, 'board')).tasks.length, 0);
+    const recall = await runCli(other, 'recall', 'Archive each transect under its sampling date.', '--backend', 'git');
+    const savedRule = applied.paths.find((entry) => entry.endsWith('/survey-date-rule.json'));
+    assert.ok(recall.results.some((result) => result.path === savedRule));
+    const rule = JSON.parse(git(other, ['show', firstBoot.canonCommit + ':' + savedRule]));
+    assert.equal(rule.treatment, 'reference-data');
+    assert.equal(rule.provenance.scope, 'project/field-guide');
+    assert.equal(rule.provenance.observedAt, '2026-01-20T09:00:00.000Z');
+    assert.equal(rule.provenance.sourceRef, 'example-thread message 6');
+    assert.deepEqual(git(other, ['diff', '--name-only', blank + '..' + second.commit]).split('\n')
+      .filter((entry) => entry.startsWith('skills/') || entry === 'AGENTS.md' || entry.startsWith('state/')), []);
+  } finally {
+    assert.equal(path.dirname(temp), os.tmpdir());
+    assert.ok(path.basename(temp).startsWith('hars-mem-onboarding-'));
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
 async function readLiveTask(workspace) {
   const result = await runCli(workspace, 'brief', taskId);
   return { result, task: assertTaskEnvelope(result, 'brief') };

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFile
 import { basename, dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validatePaths } from './layout.mjs';
+import { onboarding } from './onboard.mjs';
 import { recall } from './recall.mjs';
 import { mainRef as main, pushMain, requireActive, storeCommand, storeGit, storeMarker, writeOrigin } from './store.mjs';
 
@@ -13,7 +14,7 @@ const timestamp = (time = Date.now()) => new Date(time).toISOString();
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const endings = ['done', 'cancelled'];
 const inFlight = ['doing', 'blocked', 'waiting'];
-const runtimeFiles = ['hars-mem.mjs', 'layout.mjs', 'recall.mjs', 'store.mjs'];
+const runtimeFiles = ['hars-mem.mjs', 'layout.mjs', 'onboard.mjs', 'recall.mjs', 'store.mjs'];
 const runtimeAtLaunch = new Map(runtimeFiles.map((file) => [
   file, readFileSync(new URL(file, import.meta.url), 'utf8').replace(/\r\n/g, '\n'),
 ]));
@@ -291,16 +292,18 @@ function writeStartResult(commit, result, deadline, head, leaseKey, options) {
   return { ...receipt, observedCommit: head, ready: canDispatch, ...(canDispatch ? context : {}) };
 }
 
-function publish(message, change, startOptions) {
-  const address = writeOrigin(git);
+function publish(message, change, startOptions, route) {
+  const address = route?.address ?? writeOrigin(git);
   let base = live({ address });
   for (let attempt = 0; attempt < 5; attempt++) {
     verifyRuntime(base);
     const { files, result, deadline, leaseKey } = change(base);
+    if (route && Object.keys(files).length) route.recheck();
     const commit = makeCommit(base, files, message);
     if (!commit) return writeResult(base, result, deadline);
     let pushError;
-    writeOrigin(git, address);
+    if (route) route.recheck();
+    else writeOrigin(git, address);
     requireThat(deadline === undefined || Date.now() < deadline, 'Lease expired before push. Read the live task before retrying.');
     try {
       // The new commit is a direct child of base. The lease requires the remote to still equal base.
@@ -312,6 +315,7 @@ function publish(message, change, startOptions) {
     try {
       // A cutover may have frozen main just after our successful push. Read it
       // back for the write receipt, then enforce the fence before any retry.
+      if (route) route.recheck();
       head = live({ allowFrozen: true, address });
     } catch (error) {
       if (startOptions && !pushError) return writeStartResult(commit, result, deadline, null, leaseKey, startOptions);
@@ -576,7 +580,10 @@ function searchFiles(commit, agent) {
 
 const commands = {
   help: () => ({ read: ['boot', 'brief', 'board', 'check', 'recall', 'sync', 'outbox'], store: ['check', 'migrate'],
+    onboard: ['start', 'status', 'inventory', 'preview', 'apply'],
     work: ['add', 'start', 'claim', 'heartbeat', 'save', 'release', 'finish', 'settle', 'snapshot', 'rebuild'], guide: 'ONBOARDING.md' }),
+  onboard: (action, options) => onboarding(action, options,
+    { git, live, verifyRuntime, localPath, writeLocal, publish, pending, ancestor, pathsAt, read, readJson }),
   boot: (_, options) => boot(options),
   store: (action, options) => storeCommand(action, options, { git, readJson, verifyRuntime, makeCommit, live }),
   brief: (id, options) => {

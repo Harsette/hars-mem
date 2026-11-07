@@ -37,6 +37,8 @@ cd hars-mem
 
 Run [setup](ONBOARDING.md#create-the-owners-blank-workspace) once against an empty store you control. Give the agent that store's URL or path and ask it to read [onboarding](ONBOARDING.md#start-or-resume-an-agent).
 
+Use the [first-run import](ONBOARDING.md#bring-over-one-project) to bring selected material from one project into the private store. Inventory the sources, preview the dated records, and approve the exact import when it is ready.
+
 | Agent | Where it starts |
 | --- | --- |
 | Persistent agent | Reuse its stable ID, keep native craft private, and read current rules plus its scoped portable snapshot. |

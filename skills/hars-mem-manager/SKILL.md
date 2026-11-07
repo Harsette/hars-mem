@@ -47,7 +47,7 @@ A bare inner-repo SHA needs one of those links or records. Direct SHA receipts m
 
 ## Switch the canonical store
 
-Supported store routes are GitHub and a local bare Git repository. Choose one. Inspect it from a full standalone clone with one origin and the same read and write endpoint. Have an owner-authorized writer checkpoint and release in-flight work before the switch. Preserve the original source SHA and use a destination with no refs.
+Supported store routes are GitHub and a local bare Git repository. Choose one. Inspect it from a full standalone clone with one origin and the same read and write endpoint. Have an owner-authorized writer checkpoint and release in-flight work before the switch. Preserve the original source SHA and use a destination with no refs. For a GitHub destination, use its direct HTTPS URL and an already authorized GitHub CLI session so migration can verify private visibility.
 
 ~~~sh
 node hars-mem.mjs store check

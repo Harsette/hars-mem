@@ -1,61 +1,34 @@
 # Hars-Mem
 
-Give your agents one place to pick up where the last one stopped.
+A Git-backed second brain for the work your agents share.
 
-Hars-Mem is a blank, Git-backed second brain for an owner's rules, project knowledge, tasks, and handoffs. A persistent agent and a fresh chat both start from the current rules and board. Give either agent the repository URL and ask it to read [ONBOARDING.md](ONBOARDING.md).
+I run agents across different chats, tools and machines. I wanted them to start from the same decisions, see who was already working on a task, and leave something the next agent could pick up. So I built one place they can all read and write back to.
 
-**[Start with a blank workspace](ONBOARDING.md)**
+**[Set up your brain](ONBOARDING.md)** | [See how work moves](WORKFLOW.md) | [Bring an existing repo](ADAPT.md)
 
-Your first boot returns the canonical commit, the agent registration path, and `task: null`. The board returns `tasks: []`.
+## What lives where
 
-~~~mermaid
+| In your brain | In each project |
+| --- | --- |
+| Your rules, decisions, task board, checkpoints and summaries that link back to evidence. | The repo, its own instructions and skills, working logs and tests. |
+
+Your brain tells an agent which project it owns, what has already been decided and where to check what is true today. The agent works in the project and saves a checkpoint or a verified result back to the board.
+
+```mermaid
 flowchart TD
-  A["Persistent agent or fresh chat"] --> B["One owner-selected Git store"]
-  B --> C["Read current rules, board, and task"]
-  C --> D["Claim and work in scope"]
-  D --> E["Return a checkpoint or verified receipt"]
-  E --> B
-~~~
+  Store["Selected Git store"] --> Agent["Agent in a scoped project"]
+  Agent --> Result["Checkpoint or verified result"]
+  Result --> Store
+```
 
-| Layer | Where to look |
-| --- | --- |
-| Canon | [AGENTS.md](AGENTS.md) and owner-approved decisions |
-| Records | Task records, checkpoints, receipts, and repo-local work logs |
-| Process | The [Manager skill](skills/hars-mem-manager/SKILL.md) and project skills |
-| Situation | The current brief, live claim, and applicable [holds](holds.json) |
-| Memory | Scoped [portable snapshots](snapshots/) with reusable craft and retrieval pointers |
-| Project knowledge | Syntheses and [source maps](ADAPT.md#link-project-sources) that point to the records and live systems behind a fact |
+## Start with your own store
 
-Use a private GitHub repo or a local bare Git repo as the active store. The [Manager](skills/hars-mem-manager/SKILL.md) covers switching stores, routing work into an inner repo, and recovering from interruptions. [Hosted access](HOSTED.md) covers read-only clients. [Folder mapping and recall](ADAPT.md) covers adapting an existing repo and searching it with Git or a rebuildable SQLite cache.
+Use a private GitHub repo or local Git. Follow the setup guide, point your first agent at the store, and give it one task. Always-on agents and fresh chats both start from the same rules and board.
 
-## Choose your setup
+Use the [guided interview](ONBOARDING.md#bring-over-one-project) to review a selected import or paste the handoff prompt into an existing chat.
 
-~~~sh
-git clone --origin starter https://github.com/Harsette/hars-mem.git hars-mem
-cd hars-mem
-~~~
+Use [hosted access](HOSTED.md) from a browser or a read-only connector. To look up saved work, see [how to find written knowledge](ADAPT.md#find-written-knowledge).
 
-Run [setup](ONBOARDING.md#create-the-owners-blank-workspace) once against an empty store you control. Give the agent that store's URL or path and ask it to read [onboarding](ONBOARDING.md#start-or-resume-an-agent).
+## The handoff we tested
 
-Use the [first-run import](ONBOARDING.md#bring-over-one-project) to bring selected material from one project into the private store. Inventory the sources, preview the dated records, and approve the exact import when it is ready.
-
-| Agent | Where it starts |
-| --- | --- |
-| Persistent agent | Reuse its stable ID, keep native craft private, and read current rules plus its scoped portable snapshot. |
-| Fresh chat | Start with the store address and onboarding. Read the live board and task brief, then resume from the saved checkpoint. |
-
-## Stores and read paths
-
-| Route | Capability and evidence |
-| --- | --- |
-| Private GitHub | Default canonical store. The initial [setup commit](https://github.com/Harsette/hars-mem/commit/f798e0abe3edab18ba0282044dfd960435dcb6bb) was written and read back on GitHub. The current [store preflight](store.mjs) was checked against GitHub with an authenticated read and dry-run push negotiation. |
-| Local bare Git | Alternate canonical store. A real [cutover](skills/hars-mem-manager/SKILL.md#switch-the-canonical-store) between two local bare Git stores preserved the task and checkpoint, fenced clients still pointed at the old store, and let a fresh worker resume the same task. |
-| Hosted connector or browser | [Read-only handoff](HOSTED.md). Read a pinned revision and send an unsaved draft to an authorized shell or current lease holder for write and readback. |
-| Git or SQLite recall | Direct Git reads the selected revision. SQLite is an optional, rebuildable local cache of that same revision. [Recall and folder mapping](ADAPT.md#find-written-knowledge) |
-| Non-Git adapters | Future examples include PostgreSQL, S3-compatible object storage, and SharePoint. The [adapter contract](skills/hars-mem-manager/SKILL.md#switch-the-canonical-store) defines the required revision, conditional write, and cutover behavior. |
-
-## Release checks
-
-At [8e71048](https://github.com/Harsette/hars-mem/commit/8e710484908258a1e0b914a15e09e6b63449a977), `node --test tests/acceptance.mjs` passed all four [acceptance tests](https://github.com/Harsette/hars-mem/blob/8e710484908258a1e0b914a15e09e6b63449a977/tests/acceptance.mjs) on Node 24.20.0. The suite uses disposable Git stores to test first boot and handoff, direct and cached recall, cutover and retry, and dispatch when a hold arrives during claim readback.
-
-A separate local replay on the tree at [5b67719](https://github.com/Harsette/hars-mem/commit/5b67719cf4f6f1cf63959d06dfa89d6fd1c17889) verified blank setup, a persistent-to-fresh handoff, and a [minimal inner-repo handoff](skills/hars-mem-manager/SKILL.md#hand-off-to-an-inner-repo) that settled the central task with independently checked evidence. The GitHub store preflight and the local cutover are separate checks.
+We switched between two local Git stores. A fresh agent got the new address and project scope. It found the saved checkpoint, claimed the same task and finished it. [Run the acceptance tests](tests/acceptance.mjs).

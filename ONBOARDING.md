@@ -124,10 +124,28 @@ node hars-mem.mjs board
 
 `store check` identifies the authority and reports the result of the push negotiation. A successful negotiation is a preflight; a saved registration or task write with readback proves write access. Boot fetches current main, uses the current rules, and returns `canonCommit`, `registrationPath`, and the first task in scope, if one exists. An empty workspace returns `task: null` and `tasks: []`.
 
-- **Persistent agent.** Reuse a stable ID and scope. Read current canon on start, resume, and any owner-authorized cadence. Keep native preferences and private memory in your harness. Reconcile shared claims against current canon yourself. If you pass `--memory PATH`, use a temporary, scoped text file; the CLI flags it for review. Boot reads your prior portable snapshot for the same scope when one exists. Save reusable craft and source pointers through `snapshot`; save task progress through `save`. Checkpoint and release before handing off.
+- **Persistent agent.** Use the [checklist below](#persistent-agent-checklist) to keep the same identity and verify what carries across contexts.
 - **Fresh chat.** Start from the selected repository and this page. Use the existing stable ID if the owner assigned the same role, or a new ID for a different role. Read the live board and the relevant brief, then resume from the written checkpoint. A chat talking to the owner takes the outer role; a dispatched agent takes the worker role. The task and receipt come from the store.
 
 If the client only has a GitHub connector or browser, follow [the hosted handoff](HOSTED.md). Read the exact main commit, rules, and scoped task. If `.hars-mem-store.json` marks that commit frozen, treat it as historical and ask for the verified active store. Hand an unsaved draft to the authorized writer and check their readback before reporting it saved.
+
+### Persistent-agent checklist
+
+1. Register from the owner-selected store with a stable ID, known project scope, and the role and capabilities you actually have. Record `canonCommit` and `registrationPath`. The example uses an outer agent for the field-guide project.
+
+   ~~~sh
+   node hars-mem.mjs boot --agent desk-agent --role outer --scope field-guide --capabilities shell,git-read,git-write
+   ~~~
+
+2. Keep private native memory in its harness. When the owner wants to share selected native notes or skills, use the harness's existing permission and export flow for that source. Keep the selected file outside Git, then [preview and approve](#preview-and-approve) the scoped import as reference data. If using `boot --memory PATH`, supply a temporary scoped file for the review reminder. Check current shared claims against canon.
+3. Prepare a reviewed portable snapshot with reusable craft, a dated scope, and source pointers. Save task progress through the [work loop](WORKFLOW.md#save-and-hand-off).
+
+   ~~~sh
+   node hars-mem.mjs snapshot --agent desk-agent --file "/private/desk-agent-snapshot.md"
+   ~~~
+
+4. Check the verified write's returned `commit` and `path`. Read that exact file with `git show COMMIT:PATH`. In a separate authorized clone or fresh context, run the same boot command with the same ID and scope. Confirm that `memory.snapshot` returns the expected path, commit, and content. This readback proves what carried over.
+5. On start and resume, read current canon. If the owner approves a cadence, choose one time in the owner's IANA time zone and use the same authorized native harness and stable ID. Use a manual boot and snapshot review when that harness cannot run on a cadence. Use the [recurring ingestion guide](INGESTION.md) for separately approved source feeds.
 
 ## Open the first project
 

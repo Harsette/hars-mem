@@ -185,9 +185,40 @@ test('owner-reviewed onboarding imports one scoped export with provenance and gu
     assert.equal(objects(), before);
     assert.equal(head(), blank);
 
+    // Swap just the push route after Git has built the approved commit.
+    const injector = path.join(temp, 'switch-push-route.cjs');
+    await writeFile(injector, [
+      "const cp = require('node:child_process');",
+      'const run = cp.spawnSync;',
+      'cp.spawnSync = (command, args, options) => {',
+      '  const result = run(command, args, options);',
+      "  if (command === 'git' && args.includes('commit-tree') && result.status === 0) {",
+      "    const changed = run('git', ['config', 'remote.origin.pushurl', " + JSON.stringify(alternate) + ']);',
+      "    if (changed.status !== 0) throw new Error('Synthetic route change failed');",
+      '  }',
+      '  return result;',
+      '};',
+      "require('node:module').syncBuiltinESMExports();",
+    ].join('\n'));
+    const race = await runProcess(process.execPath,
+      ['--require', injector, path.join(seed, 'hars-mem.mjs'), 'onboard', ...applyArgs, ...attest], seed);
+    assert.notEqual(race.code, 0);
+    assert.match(race.stderr, /no separate push URL/);
+    assert.equal(head(), blank);
+    assert.equal(git(temp, ['--git-dir', alternate, 'rev-parse', 'main']), blank);
+    const proposedBlob = spawnSync('git', ['hash-object', '--stdin'], {
+      cwd: seed, encoding: 'utf8', input: JSON.stringify(preview.records[1].record, null, 2) + '\n',
+    });
+    assert.equal(proposedBlob.status, 0);
+    const rejectedBlob = spawnSync('git', ['cat-file', '-e', proposedBlob.stdout.trim()], { cwd: seed });
+    assert.notEqual(rejectedBlob.status, 0, 'Rejected onboarding blob must stay outside the checkout object database');
+    assert.equal(objects(), before);
+    git(seed, ['config', '--unset', 'remote.origin.pushurl']);
+
     const applied = await onboard(...applyArgs, ...attest);
     assert.equal(applied.status, 'imported');
     assert.equal(applied.commit, head());
+    assert.equal(git(seed, ['rev-parse', 'refs/remotes/origin/main']), applied.commit);
     assert.equal(git(temp, ['--git-dir', origin, 'rev-list', '--count', blank + '..main']), '1');
     assert.deepEqual(await onboard(...applyArgs, ...attest), { ...applied, status: 'already-imported' });
     const duplicates = await onboard(...previewArgs, ...attest);
@@ -231,11 +262,26 @@ test('owner-reviewed onboarding imports one scoped export with provenance and gu
     const advanced = head();
     assert.match((await refuse(...localApply)).stderr, /Main changed after preview/);
     assert.equal(head(), advanced);
-    assert.equal((await runCli(seed, 'outbox')).pending.length, 1);
+    assert.equal((await runCli(seed, 'outbox')).pending.length, 2);
     const resumed = await onboard(...localPreviewArgs);
-    const second = await onboard('apply', '--session', session, '--approve', resumed.approval, '--file', localPath, ...attest);
+    const resumeArgs = ['apply', '--session', session, '--approve', resumed.approval, '--file', localPath, ...attest];
+    // Interrupt readback after a successful push. Replaying the approval discovers the accepted commit.
+    const beforeUnknown = objects();
+    await writeFile(injector, (await readFile(injector, 'utf8')).replace("'commit-tree'", "'push'"));
+    const uncertain = await runProcess(process.execPath,
+      ['--require', injector, path.join(seed, 'hars-mem.mjs'), 'onboard', ...resumeArgs], seed);
+    assert.notEqual(uncertain.code, 0);
+    assert.match(uncertain.stderr, /Write outcome unknown for commit [0-9a-f]{40}.*Input preserved/);
+    assert.notEqual(head(), advanced);
+    assert.equal(objects(), beforeUnknown);
+    assert.equal(git(seed, ['rev-parse', 'refs/remotes/origin/main']), advanced);
+    assert.equal(git(temp, ['--git-dir', alternate, 'rev-parse', 'main']), blank);
+    git(seed, ['config', '--unset', 'remote.origin.pushurl']);
+    const second = await onboard(...resumeArgs);
     assert.equal(second.commit, head());
-    assert.equal(second.status, 'imported');
+    assert.equal(second.status, 'already-imported');
+    assert.equal(git(seed, ['rev-parse', 'refs/remotes/origin/main']), second.commit);
+    assert.equal(git(temp, ['--git-dir', origin, 'rev-list', '--count', advanced + '..main']), '1');
     assert.equal(git(seed, ['log', '--all', '-S', dummySecret, '--oneline']), '');
 
     git(temp, ['clone', '--branch', 'main', origin, other]);

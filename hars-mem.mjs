@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, posix } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, delimiter, dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validatePaths } from './layout.mjs';
 import { onboarding } from './onboard.mjs';
@@ -181,22 +182,39 @@ function writeLocal(path, value) {
   writeFileSync(path, jsonText(value), { flag: 'wx', mode: 0o600 });
 }
 
-function makeCommit(base, files, message) {
+function makeCommit(base, files, message, writeGit = git) {
   const index = localPath('index-' + randomUUID());
   mkdirSync(dirname(index), { recursive: true });
   const extraEnv = { GIT_INDEX_FILE: index };
   try {
-    git(['read-tree', base], { extraEnv });
+    writeGit(['read-tree', base], { extraEnv });
     for (const [path, content] of Object.entries(files)) {
-      const blob = git(['hash-object', '-w', '--stdin'], { input: content });
-      git(['update-index', '--add', '--cacheinfo', '100644,' + blob + ',' + path], { extraEnv });
+      const blob = writeGit(['hash-object', '-w', '--stdin'], { input: content });
+      writeGit(['update-index', '--add', '--cacheinfo', '100644,' + blob + ',' + path], { extraEnv });
     }
-    const tree = git(['write-tree'], { extraEnv });
+    const tree = writeGit(['write-tree'], { extraEnv });
     if (tree === git(['rev-parse', base + '^{tree}'])) return null;
-    return git(['-c', 'user.name=Hars-Mem', '-c', 'user.email=hars-mem@users.noreply.example',
+    return writeGit(['-c', 'user.name=Hars-Mem', '-c', 'user.email=hars-mem@users.noreply.example',
       'commit-tree', tree, '-p', base, '-m', message]);
   } finally {
     if (existsSync(index)) unlinkSync(index);
+  }
+}
+
+function withObjectQuarantine(action) {
+  const existing = git(['rev-parse', '--path-format=absolute', '--git-path', 'objects']).replaceAll('\\', '/');
+  const directory = mkdtempSync(join(realpathSync(tmpdir()), 'hars-mem-objects-'));
+  const objectEnv = {
+    GIT_OBJECT_DIRECTORY: directory,
+    GIT_ALTERNATE_OBJECT_DIRECTORIES: [JSON.stringify(existing), process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES]
+      .filter(Boolean).join(delimiter),
+  };
+  try {
+    return action((args, options = {}) => git(args, {
+      ...options, extraEnv: { ...options.extraEnv, ...objectEnv },
+    }));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 }
 
@@ -292,18 +310,16 @@ function writeStartResult(commit, result, deadline, head, leaseKey, options) {
   return { ...receipt, observedCommit: head, ready: canDispatch, ...(canDispatch ? context : {}) };
 }
 
-function publish(message, change, startOptions, route) {
-  const address = route?.address ?? writeOrigin(git);
+function publish(message, change, startOptions) {
+  const address = writeOrigin(git);
   let base = live({ address });
   for (let attempt = 0; attempt < 5; attempt++) {
     verifyRuntime(base);
     const { files, result, deadline, leaseKey } = change(base);
-    if (route && Object.keys(files).length) route.recheck();
     const commit = makeCommit(base, files, message);
     if (!commit) return writeResult(base, result, deadline);
     let pushError;
-    if (route) route.recheck();
-    else writeOrigin(git, address);
+    writeOrigin(git, address);
     requireThat(deadline === undefined || Date.now() < deadline, 'Lease expired before push. Read the live task before retrying.');
     try {
       // The new commit is a direct child of base. The lease requires the remote to still equal base.
@@ -315,7 +331,6 @@ function publish(message, change, startOptions, route) {
     try {
       // A cutover may have frozen main just after our successful push. Read it
       // back for the write receipt, then enforce the fence before any retry.
-      if (route) route.recheck();
       head = live({ allowFrozen: true, address });
     } catch (error) {
       if (startOptions && !pushError) return writeStartResult(commit, result, deadline, null, leaseKey, startOptions);
@@ -332,6 +347,53 @@ function publish(message, change, startOptions, route) {
     base = head;
   }
   throw new Error('Origin kept advancing. Read the live task and retry.');
+}
+
+function publishOnboarding(message, change, { address, checkTarget, checkSource }) {
+  let base = live({ address });
+  for (let attempt = 0; attempt < 5; attempt++) {
+    verifyRuntime(base);
+    const { files, result } = change(base);
+    if (!Object.keys(files).length) return writeResult(base, result);
+    checkTarget();
+    const observed = withObjectQuarantine((writeGit) => {
+      const commit = makeCommit(base, files, message, writeGit);
+      checkSource();
+      checkTarget();
+      let pushError;
+      try {
+        pushMain(writeGit, address, commit, base);
+      } catch (error) {
+        pushError = error;
+      }
+      try {
+        checkTarget();
+        const [head, ref] = storeGit(git, address, 'ls-remote', ['--refs'], [main]).split('\t');
+        requireThat(/^[a-f0-9]{40}$/.test(head) && ref === main, 'No verified main at the approved destination.');
+        if (head !== commit && head !== base) {
+          storeGit(writeGit, address, 'fetch', ['--no-tags', '--no-write-fetch-head', '--refmap='], [head]);
+        }
+        const accepted = writeGit(['merge-base', '--is-ancestor', commit, head], { optional: true }) !== null;
+        if (accepted) {
+          // Materialize the verified remote commit through Git. Never copy objects from quarantine.
+          checkTarget();
+          storeGit(git, address, 'fetch', ['--no-tags'], ['+' + head + ':' + remoteMain]);
+          return { commit };
+        }
+        return { head, pushError };
+      } catch (error) {
+        throw new Error('Write outcome unknown for commit ' + commit + '. Read origin/main before retrying. ' + error.message);
+      }
+    });
+    if (observed.commit) return writeResult(observed.commit, result);
+    requireThat(observed.pushError, 'Published onboarding commit disappeared. Inspect remote history.');
+    requireThat(observed.head !== base, 'Write refused by origin. ' + observed.pushError.message);
+    checkTarget();
+    const current = live({ address });
+    requireThat(ancestor(base, current), 'Origin history changed. Inspect both commits before retrying.');
+    base = current;
+  }
+  throw new Error('Origin kept advancing. Prepare and review a new preview.');
 }
 
 function registered(commit, agent) {
@@ -583,7 +645,7 @@ const commands = {
     onboard: ['start', 'status', 'inventory', 'preview', 'apply'],
     work: ['add', 'start', 'claim', 'heartbeat', 'save', 'release', 'finish', 'settle', 'snapshot', 'rebuild'], guide: 'ONBOARDING.md' }),
   onboard: (action, options) => onboarding(action, options,
-    { git, live, verifyRuntime, localPath, writeLocal, publish, pending, ancestor, pathsAt, read, readJson }),
+    { git, live, verifyRuntime, localPath, writeLocal, publishOnboarding, pending, ancestor, pathsAt, read, readJson }),
   boot: (_, options) => boot(options),
   store: (action, options) => storeCommand(action, options, { git, readJson, verifyRuntime, makeCommit, live }),
   brief: (id, options) => {

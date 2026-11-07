@@ -216,7 +216,7 @@ function list(path) {
 }
 
 export function onboarding(action, options, dependencies) {
-  const { git, live, verifyRuntime, localPath, writeLocal, publish, pending, ancestor, pathsAt, readJson } = dependencies;
+  const { git, live, verifyRuntime, localPath, writeLocal, publishOnboarding, pending, ancestor, pathsAt, readJson } = dependencies;
   const allowed = {
     start: ['attest'],
     status: ['session'],
@@ -288,12 +288,15 @@ export function onboarding(action, options, dependencies) {
   requireThat(digest(plan) === approval && plan.session === session, 'The preview changed. Prepare and review it again.');
   matchTarget(plan.target);
   requireThat(plan.records.every(({ action }) => action !== 'conflict'), 'Resolve preview conflicts before approving.');
-  const selected = artifact(options.file, dependencies);
-  requireThat(selected.fingerprint === plan.fingerprint, 'The source artifact changed. Prepare and review a new preview.');
-  const data = bundle(selected.value, plan.authorization);
-  const route = { address: target.address, recheck: () => matchTarget(privateOrigin(git)) };
+  const checkSource = () => {
+    const selected = artifact(options.file, dependencies);
+    requireThat(selected.fingerprint === plan.fingerprint, 'The source artifact changed. Prepare and review a new preview.');
+    return selected.value;
+  };
+  const data = bundle(checkSource(), plan.authorization);
+  const route = { address: target.address, checkSource, checkTarget: () => matchTarget(privateOrigin(git)) };
   return pending({ action: 'onboard-apply', session, approval, target: target.identity }, () =>
-    publish('Import approved onboarding records', (base) => {
+    publishOnboarding('Import approved onboarding records', (base) => {
       requireThat(ancestor(plan.base, base), 'The store history changed. Prepare and review a new preview.');
       const current = changes(base, data, dependencies);
       const paths = current.map(({ path }) => path);
@@ -307,5 +310,5 @@ export function onboarding(action, options, dependencies) {
         'A workspace-wide hold blocks onboarding writes.');
       const files = Object.fromEntries(current.filter(({ action }) => action === 'add').map(({ path, record }) => [path, json(record)]));
       return { files, result: { approval, paths, status: 'imported' } };
-    }, undefined, route));
+    }, route));
 }

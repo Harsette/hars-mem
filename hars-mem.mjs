@@ -5,15 +5,15 @@ import { basename, dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validatePaths } from './layout.mjs';
 import { recall } from './recall.mjs';
+import { mainRef as main, requireActive, storeCommand, storeMarker } from './store.mjs';
 
-const main = 'refs/heads/main';
 const remoteMain = 'refs/remotes/origin/main';
 const jsonText = (value) => JSON.stringify(value, null, 2) + '\n';
 const timestamp = (time = Date.now()) => new Date(time).toISOString();
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const endings = ['done', 'cancelled'];
 const inFlight = ['doing', 'blocked', 'waiting'];
-const runtimeFiles = ['hars-mem.mjs', 'layout.mjs', 'recall.mjs'];
+const runtimeFiles = ['hars-mem.mjs', 'layout.mjs', 'recall.mjs', 'store.mjs'];
 const runtimeAtLaunch = new Map(runtimeFiles.map((file) => [
   file, readFileSync(new URL(file, import.meta.url), 'utf8').replace(/\r\n/g, '\n'),
 ]));
@@ -34,13 +34,16 @@ function git(args, { input, extraEnv, optional, raw } = {}) {
   throw new Error(message.replace(/(https?:\/\/)[^\s/@]+@/gi, '$1[redacted]@') || 'Git command failed.');
 }
 
-function live() {
+function live({ allowFrozen = false } = {}) {
+  let commit;
   try {
     git(['fetch', '--no-tags', 'origin', '+' + main + ':' + remoteMain]);
-    return git(['rev-parse', remoteMain]);
+    commit = git(['rev-parse', remoteMain]);
   } catch (error) {
     throw new Error('Live origin/main unavailable. State is unknown. ' + error.message);
   }
+  if (!allowFrozen) requireActive(readJson, commit);
+  return commit;
 }
 
 function read(commit, path, optional = false) {
@@ -51,6 +54,16 @@ function read(commit, path, optional = false) {
 function readJson(commit, path, optional = false) {
   const result = read(commit, path, optional);
   return result === null ? null : JSON.parse(result);
+}
+
+function readSource(options) {
+  const commit = options['as-of'];
+  if (commit === undefined) return { commit: live(), provenance: { mode: 'live', ref: main, verifiedAt: timestamp() } };
+  requireThat(/^[0-9a-f]{40}$/.test(commit), 'Use --as-of with the full SHA of a locally available main commit.');
+  const observed = git(['rev-parse', '--verify', remoteMain], { optional: true });
+  requireThat(observed && git(['cat-file', '-t', commit], { optional: true }) === 'commit' && ancestor(commit, observed),
+    'Commit is unavailable in the local observed origin/main history. Fetch the source first.');
+  return { commit, provenance: { mode: 'as-of', ref: main, current: false } };
 }
 
 function taskId(id) {
@@ -95,7 +108,7 @@ function tasksAt(commit) {
 function publicTask(task, now) {
   if (!task?.lease) return task;
   const { agent, claimedAt, expiresAt } = task.lease;
-  return { ...task, lease: { agent, claimedAt, expiresAt, active: active(task.lease, now) } };
+  return { ...task, lease: { agent, claimedAt, expiresAt, active: now === null ? null : active(task.lease, now) } };
 }
 
 function holdsAt(commit, task) {
@@ -108,17 +121,24 @@ function blockersAt(commit, task) {
   return task.dependsOn.filter((id) => taskAt(commit, id).status !== 'done');
 }
 
-function packetAt(commit, task) {
+function packetAt(commit, task, options) {
+  const minimal = options.packet === 'minimal';
+  requireThat(options.packet === undefined || minimal, 'Use --packet minimal for a handoff with source pointers.');
   const project = pathsAt(commit).projects + '/' + projectOf(task);
   const sourceList = readJson(commit, project + '/SOURCES.json', true) ?? [];
   const synthesis = project + '/SYNTHESIS.md';
   return {
+    taskId: task.id, revision: task.rev, detail: task.detail, checkpoints: task.checkpoints,
     goal: task.goal, doneWhen: task.doneWhen, files: task.files, excluded: task.excluded, proof: task.proof,
     holds: holdsAt(commit, task), blockedBy: blockersAt(commit, task),
     synthesis: read(commit, synthesis, true) === null ? null : synthesis,
-    sources: sourceList.map((source) => source.kind === 'repo'
-      ? { ...source, commit, content: read(commit, source.path) }
-      : { ...source, verified: false }),
+    sources: sourceList.map((source) => {
+      if (!minimal) return source.kind === 'repo'
+        ? { ...source, commit, content: read(commit, source.path) }
+        : { ...source, verified: false };
+      const { id, kind, owner, use, path, url } = source;
+      return kind === 'repo' ? { id, kind, owner, use, path, commit } : { id, kind, owner, use, url, verified: false };
+    }),
   };
 }
 
@@ -211,7 +231,7 @@ function writeResult(commit, result, deadline, head = commit, leaseKey) {
   let leaseCurrent = true;
   if (head !== commit && leaseKey) {
     try {
-      leaseCurrent = taskAt(head, result.task.id).lease?.key === leaseKey;
+      leaseCurrent = storeMarker(readJson, head)?.state !== 'frozen' && taskAt(head, result.task.id).lease?.key === leaseKey;
     } catch {
       leaseCurrent = false;
     }
@@ -255,7 +275,9 @@ function publish(message, change) {
     }
     let head;
     try {
-      head = live();
+      // A cutover may have frozen main just after our successful push. Read it
+      // back for the write receipt, then enforce the fence before any retry.
+      head = live({ allowFrozen: true });
     } catch (error) {
       throw new Error('Write outcome unknown for commit ' + commit + '. Read origin/main before retrying. ' + error.message);
     }
@@ -263,6 +285,7 @@ function publish(message, change) {
     requireThat(pushError, 'Published commit ' + commit + ' disappeared. Inspect remote history.');
     requireThat(head !== base, 'Write refused by origin. ' + pushError.message);
     requireThat(ancestor(base, head), 'Origin history changed. Inspect both commits before retrying.');
+    requireActive(readJson, head);
     base = head;
   }
   throw new Error('Origin kept advancing. Read the live task and retry.');
@@ -289,12 +312,16 @@ function boot(options) {
       agent, role: options.role, scope, capabilities,
       snapshot: paths.snapshots + '/' + agent + '/LATEST.md', canonBlob: git(['rev-parse', base + ':AGENTS.md']),
     };
+    const snapshotCommit = git(['log', '-1', '--format=%H', base, '--', registration.snapshot]);
+    const snapshotScope = snapshotCommit ? readJson(snapshotCommit, agentPath(pathsAt(snapshotCommit), agent), true)?.scope : null;
+    const portable = snapshotScope === scope ? read(base, registration.snapshot, true) : null;
     return {
       files: { [agentPath(paths, agent)]: jsonText(registration) },
       result: { canonCommit: base, canon, task: publicTask(task), registration, registrationPath: agentPath(paths, agent),
         memory: {
           reviewRequired: Boolean(memory),
           instruction: memory ? 'Check shared claims against live canon and keep unrelated harness craft.' : null,
+          snapshot: portable === null ? null : { path: registration.snapshot, commit: snapshotCommit, content: portable },
         } },
     };
   });
@@ -331,7 +358,7 @@ function claim(id, agent, options, withPacket = false) {
       const task = taskAt(base, id);
       ready(base, task);
       requireThat(!active(task.lease), 'Live lease held by ' + task.lease?.agent + ' through ' + task.lease?.expiresAt + '.');
-      const packet = withPacket ? { canonCommit: base, canon: read(base, 'AGENTS.md'), packet: packetAt(base, task) } : {};
+      const packet = withPacket ? { canonCommit: base, canon: read(base, 'AGENTS.md'), packet: packetAt(base, task, options) } : {};
       const now = Date.now();
       const updated = { ...task, rev: task.rev + 1, status: 'doing', updatedAt: timestamp(now),
         lease: { agent, key, claimedAt: timestamp(now), expiresAt: timestamp(now + lifetime) } };
@@ -488,10 +515,10 @@ function parse(args) {
   return { id, options };
 }
 
-function searchFiles(commit) {
+function searchFiles(commit, agent) {
   const paths = pathsAt(commit);
   const roots = ['AGENTS.md', 'ONBOARDING.md', 'WORKFLOW.md', 'skills', paths.board,
-    paths.holds, paths.projects, paths.state, paths.snapshots, paths.knowledge];
+    paths.holds, paths.projects, paths.state, agent ? paths.snapshots + '/' + agent : paths.snapshots, paths.knowledge];
   const tracked = git(['ls-tree', '-rz', '--name-only', commit, '--', ...roots]).split('\0');
   const documents = new Set(tracked);
   for (const path of tracked) {
@@ -501,37 +528,48 @@ function searchFiles(commit) {
     }
   }
   return [...documents].sort()
+    .filter((path) => !agent || !path.startsWith(paths.snapshots + '/') || path.startsWith(paths.snapshots + '/' + agent + '/'))
     .filter((path) => /\.(md|json|txt)$/i.test(path))
     .map((path) => ({ path, body: read(commit, path, true) }))
     .filter((document) => document.body !== null);
 }
 
 const commands = {
-  help: () => ({ read: ['boot', 'brief', 'board', 'check', 'recall', 'sync', 'outbox'],
+  help: () => ({ read: ['boot', 'brief', 'board', 'check', 'recall', 'sync', 'outbox'], store: ['check', 'migrate'],
     work: ['add', 'start', 'claim', 'heartbeat', 'save', 'release', 'finish', 'settle', 'snapshot', 'rebuild'], guide: 'ONBOARDING.md' }),
   boot: (_, options) => boot(options),
-  brief: (id) => {
-    const commit = live();
-    const task = taskAt(commit, id);
-    return { commit, task: publicTask(task), packet: packetAt(commit, task) };
+  store: (action, options) => storeCommand(action, options, { git, readJson, verifyRuntime, makeCommit, live }),
+  brief: (id, options) => {
+    const source = readSource(options);
+    const task = taskAt(source.commit, id);
+    return { ...source, task: publicTask(task, source.provenance.mode === 'as-of' ? null : undefined),
+      packet: packetAt(source.commit, task, options) };
   },
-  board: () => {
-    const commit = live();
+  board: (_, options) => {
+    const source = readSource(options);
+    const { commit, provenance } = source;
     const path = pathsAt(commit).board;
-    return { commit, path, markdown: read(commit, path), tasks: tasksAt(commit).map((task) => publicTask(task)) };
+    return { ...source, path, markdown: read(commit, path),
+      tasks: tasksAt(commit).map((task) => publicTask(task, provenance.mode === 'as-of' ? null : undefined)) };
   },
-  check: () => {
-    const commit = live();
+  check: (_, options) => {
+    const source = readSource(options);
+    const { commit } = source;
     const paths = pathsAt(commit);
-    requireThat(read(commit, paths.board) === boardFor(tasksAt(commit), paths), 'Board is stale. Run rebuild.');
-    return { commit, board: 'current' };
+    const historical = source.provenance.mode === 'as-of';
+    requireThat(read(commit, paths.board) === boardFor(tasksAt(commit), paths),
+      historical ? 'Board differs from the task records at this commit.' : 'Board is stale. Run rebuild.');
+    return { ...source, board: historical ? 'matches-as-of' : 'current' };
   },
-  recall: (query, options) => {
+  recall: async (query, options) => {
     const text = required(query, 'Provide a search phrase.');
     const backend = options.backend ?? 'auto';
     requireThat(['auto', 'sqlite', 'git'].includes(backend), 'Use --backend auto, sqlite, or git.');
-    const commit = live();
-    return recall({ path: localPath('index.sqlite'), commit, load: () => searchFiles(commit), query: text, backend });
+    const agent = options.agent === undefined ? null : agentId(options.agent);
+    const { commit, provenance } = readSource(options);
+    const result = await recall({ path: localPath(agent ? 'index-' + agent + '.sqlite' : 'index.sqlite'), commit,
+      load: () => searchFiles(commit, agent), query: text, backend });
+    return { ...result, provenance, snapshotScope: agent ?? 'repository' };
   },
   rebuild: (_, options) => {
     const agent = agentId(options.agent);
@@ -568,8 +606,10 @@ const commands = {
 try {
   const [command = 'help', ...args] = process.argv.slice(2);
   requireThat(Object.hasOwn(commands, command), 'Unknown command. Run node hars-mem.mjs help.');
-  if (command === 'boot' || command === 'start') sessionStart(command, args);
   const { id, options } = parse(args);
+  requireThat(options['as-of'] === undefined || ['board', 'brief', 'check', 'recall'].includes(command),
+    'Historical reads cannot act on tasks. Use --as-of only with board, brief, check, or recall.');
+  if (command === 'boot' || command === 'start') sessionStart(command, args);
   process.stdout.write(jsonText(await commands[command](id, options)));
 } catch (error) {
   process.stderr.write(error.message + '\n');

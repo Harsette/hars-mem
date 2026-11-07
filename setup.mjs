@@ -1,24 +1,21 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { isAbsolute } from 'node:path';
 import { validatePaths } from './layout.mjs';
+import { endpoint, mainRef as branch } from './store.mjs';
 
 const [first, local] = process.argv.slice(2);
-const url = first === '--local' ? local : first;
-const isGitHub = /^(?:https:\/\/github\.com\/|git@github\.com:)[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(url ?? '');
-const usage = 'Run node setup.mjs https://github.com/YOUR-ACCOUNT/YOUR-REPO.git from the Hars-Mem folder.';
-const branch = 'refs/heads/main';
+const usage = 'Run node setup.mjs GITHUB_URL or node setup.mjs --local ABSOLUTE_BARE_GIT_PATH from the Hars-Mem folder.';
 const releasePaths = [
   '.gitattributes', '.gitignore', 'ADAPT.md', 'AGENTS.md', 'HOSTED.md', 'ONBOARDING.md',
   'README.md', 'WORKFLOW.md', 'hars-mem.mjs', 'layout.mjs', 'paths.json', 'recall.mjs',
-  'setup.mjs', 'skills',
+  'setup.mjs', 'skills', 'store.mjs',
 ];
 
 function requireThat(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-function git(args, optional = false) {
+function git(args, { optional = false } = {}) {
   const result = spawnSync('git', args, { encoding: 'utf8', windowsHide: true, timeout: 30000,
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never' } });
   if (result.status === 0) return result.stdout.trim();
@@ -27,14 +24,19 @@ function git(args, optional = false) {
 }
 
 try {
-  requireThat(isGitHub || (first === '--local' && url && isAbsolute(url)), usage);
+  const localSetup = first === '--local';
+  requireThat(process.argv.length === (localSetup ? 4 : 3), usage);
+  const store = endpoint(git, localSetup ? local : first);
+  requireThat(store.type === (localSetup ? 'local-bare-git' : 'github'), usage);
+  const url = store.address;
   requireThat(releasePaths.every((path) => existsSync(path)), 'Open a terminal in the Hars-Mem folder.');
   const paths = validatePaths(JSON.parse(readFileSync('paths.json', 'utf8')));
   if (!existsSync('.git')) git(['init', '-b', 'main']);
-  requireThat(git(['symbolic-ref', '--short', 'HEAD'], true) === 'main', 'Setup needs local main.');
-  const origin = git(['remote', 'get-url', 'origin'], true);
-  requireThat(!origin || origin === url, 'This folder already has a different origin. Extract a fresh copy.');
-  if (!git(['rev-parse', '--verify', 'HEAD'], true)) {
+  requireThat(git(['symbolic-ref', '--short', 'HEAD'], { optional: true }) === 'main', 'Setup needs local main.');
+  const origin = git(['remote', 'get-url', 'origin'], { optional: true });
+  requireThat(!origin || endpoint(git, origin).identity === store.identity,
+    'This folder already has a different origin. Extract a fresh copy.');
+  if (!git(['rev-parse', '--verify', 'HEAD'], { optional: true })) {
     const data = ['tests', ...Object.values(paths)].filter((path) => existsSync(path));
     git(['add', '--', ...releasePaths, ...data]);
     git(['-c', 'user.name=Hars-Mem', '-c', 'user.email=hars-mem@users.noreply.example',
@@ -52,6 +54,6 @@ try {
   git(['branch', '--set-upstream-to=origin/main', 'main']);
   process.stdout.write('Verified main at ' + head + '. Give agents the repository URL and "Read ONBOARDING.md".\n');
 } catch (error) {
-  process.stderr.write(error.message + '\n');
+  process.stderr.write(error.message.replace(/(https?:\/\/)[^\s/@]+@/gi, '$1[redacted]@') + '\n');
   process.exitCode = 1;
 }

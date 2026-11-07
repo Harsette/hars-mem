@@ -1,6 +1,6 @@
 const keys = ['board', 'holds', 'state', 'projects', 'agents', 'checkpoints', 'snapshots', 'knowledge'];
 const reserved = ['adapt.md', 'agents.md', 'onboarding.md', 'readme.md', 'hosted.md', 'workflow.md',
-  'hars-mem.mjs', 'layout.mjs', 'recall.mjs', 'setup.mjs', 'paths.json', 'skills', 'tests'];
+  'hars-mem.mjs', 'layout.mjs', 'recall.mjs', 'setup.mjs', 'store.mjs', '.hars-mem-store.json', 'paths.json', 'skills', 'tests'];
 
 export function validatePaths(paths) {
   for (const key of keys) {

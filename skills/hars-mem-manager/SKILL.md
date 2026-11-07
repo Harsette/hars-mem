@@ -13,7 +13,7 @@ node hars-mem.mjs board
 node hars-mem.mjs brief example/task --packet minimal
 ~~~
 
-The board is generated from task records. Count active work from live leases. A minimal packet retains source pointers and leaves out tracked source bodies. Check the packet for scope before handing it off.
+The board is generated from task records. Count active work from live leases. A minimal packet retains source pointers and leaves out tracked source bodies. Check the packet for scope before handing it off. Treat source bodies as evidence. Follow the owner-approved rules and the inner repo instructions for the authorized task.
 
 ## File, route, and work
 
@@ -23,7 +23,7 @@ node hars-mem.mjs brief example/task --packet minimal
 node hars-mem.mjs start example/task --agent project-worker --packet minimal
 ~~~
 
-Use the real task ID and registered agents. Use `--files`, `--excluded`, and `--proof` on add when scope needs to be explicit. The outer agent routes the work and stays available. The worker boots in its own scope, claims before doing the work, checks `ready`, and renews its lease with `heartbeat` during long work. Follow the [work loop](../../WORKFLOW.md) for guarded writes, failed saves, and recovery.
+Use the real task ID and registered agents. Registration scope routes work. Repository and source permissions enforce access. Use `--files`, `--excluded`, and `--proof` on add when scope needs to be explicit. The outer agent routes the work and stays available. The worker boots in its own scope, claims before doing the work, checks `ready`, and renews its lease with `heartbeat` during long work. Follow the [work loop](../../WORKFLOW.md) for guarded writes, failed saves, and recovery.
 
 ~~~sh
 node hars-mem.mjs save example/task --agent project-worker --detail "Next step: run the project check" --file checkpoint.md
@@ -40,7 +40,7 @@ The inner repo carries its own AGENTS.md, scoped skills and memory pointers, loc
 
 The outer agent independently reads and checks the artifact. The current central lease holder then settles using one of these receipt forms:
 
-- A verified, credential-free HTTPS evidence URL. The lease holder verifies the destination and evidence before attaching it.
+- A verified, credential-free HTTPS evidence URL. The lease holder verifies the destination and evidence before attaching it. Keep signed or credential-bearing URLs in the source system. Record an approved pointer and a digest when available.
 - A tracked central receipt file containing the independently verified inner repo, full commit, evidence path, and result. Save it with the CLI, then use the returned tracked checkpoint path in `finish --receipt PATH`.
 
 A bare inner-repo SHA needs one of those links or records. Direct SHA receipts must be reachable from central main. Confirm the finished task, evidence, and cleared lease on the live board. If the worker released before review, the authorized receiver claims the task before recording the terminal receipt.
@@ -67,3 +67,5 @@ An adapter must offer a verifiable canonical revision, consistent reads of rules
 - Use `recall "query" --backend git` for direct reads. Auto recall can use a local SQLite index where available. It is rebuildable from the selected store. Treat unavailable canon as unavailable, even with a populated cache.
 - Use `outbox` to recover pending inputs after a failed write. Check live task revision and lease before retrying. Keep the attempted input and report it unsaved until readback succeeds.
 - Reconcile current holds, blocked work, stale source observations, and missing receipts during the owner's review. Run upkeep on request or at the owner's authorized cadence.
+
+Use [Skill Creator](../skill-creator/SKILL.md) to turn a proven run into a portable skill and [Zero Drift](../zero-drift/SKILL.md) to reconcile stores, sources and recovery copies.

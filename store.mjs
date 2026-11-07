@@ -1,6 +1,7 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 export const mainRef = 'refs/heads/main';
 export const storePath = '.hars-mem-store.json';
@@ -41,36 +42,54 @@ export function requireActive(readJson, commit) {
 }
 
 function refs(git, address) {
-  return new Map(git(['ls-remote', '--refs', '--', address]).split('\n').filter(Boolean).map((line) => {
+  return new Map(storeGit(git, address, 'ls-remote', ['--refs']).split('\n').filter(Boolean).map((line) => {
     const [commit, ref] = line.trim().split('\t');
     return [ref, commit];
   }));
 }
 
 function fetchMain(git, address) {
-  git(['fetch', '--no-tags', '--', address, mainRef]);
+  storeGit(git, address, 'fetch', ['--no-tags'], [mainRef]);
 }
 
 function ancestor(git, commit, head) {
   return git(['merge-base', '--is-ancestor', commit, head], { optional: true }) !== null;
 }
 
-function currentOrigin(git) {
-  const fetchAddress = git(['remote', 'get-url', '--all', 'origin']);
+export function originRoute(git) {
+  const fetchAddress = git(['remote', 'get-url', '--all', 'origin'], { optional: true });
   const pushAddress = git(['remote', 'get-url', '--push', '--all', 'origin'], { optional: true });
-  return { store: endpoint(git, fetchAddress), samePush: fetchAddress === pushAddress };
+  return { address: fetchAddress?.split('\n')[0].trim(),
+    samePush: Boolean(fetchAddress && !fetchAddress.includes('\n') && fetchAddress === pushAddress) };
 }
 
-function requireDirectAddress(git, store) {
+export function writeOrigin(git, expected) {
+  const { address, samePush } = originRoute(git);
+  requireThat(samePush && (expected === undefined || address === expected),
+    'Use one matching fetch and push endpoint for origin. Recheck the intended store before retrying.');
+  return address;
+}
+
+export function requireDirectAddress(git, store) {
   const rules = git(['config', '--null', '--get-regexp', '^url\\..*\\.(insteadof|pushinsteadof)$'], { optional: true });
   const prefixes = (rules ?? '').split('\0').filter(Boolean).map((rule) => rule.slice(rule.indexOf('\n') + 1));
   requireThat(!prefixes.some((prefix) => store.address.startsWith(prefix)),
     'Use a store address without a Git fetch or push URL rewrite.');
 }
 
-function pushMain(git, address, commit, expected, dryRun = false) {
-  git(['push', ...(dryRun ? ['--dry-run'] : []), '--force-with-lease=' + mainRef + ':' + expected,
-    '--', address, commit + ':' + mainRef]);
+export function storeGit(git, address, command, flags = [], refspecs = []) {
+  requireThat(address && !/[\r\n]/.test(address) && (!address.includes('=') || isAbsolute(address)),
+    'Use a Git store address that can be pinned safely.');
+  const url = address.includes('=') ? pathToFileURL(address).href.replaceAll('=', '%3D') : address;
+  const route = './.hars-mem-route-' + randomUUID();
+  // The unique full match pins this process to the resolved address. Git applies URL rewrites once.
+  return git(['-c', 'url.' + url + '.insteadOf=' + route, '-c', 'url.' + url + '.pushInsteadOf=' + route,
+    command, ...flags, '--', route, ...refspecs]);
+}
+
+export function pushMain(git, address, commit, expected, dryRun = false) {
+  storeGit(git, address, 'push', [...(dryRun ? ['--dry-run'] : []), '--no-follow-tags', '--recurse-submodules=no',
+    '--force-with-lease=' + mainRef + ':' + expected], [commit + ':' + mainRef]);
 }
 
 function setMain(git, address, commit, expected, phase) {
@@ -92,13 +111,14 @@ function setMain(git, address, commit, expected, phase) {
 }
 
 function check({ git, readJson, live }) {
-  const { store, samePush } = currentOrigin(git);
-  const commit = live({ allowFrozen: true });
+  const { address, samePush } = originRoute(git);
+  const store = endpoint(git, address);
+  const commit = live({ allowFrozen: true, address });
   const marker = storeMarker(readJson, commit);
   let pushNegotiation = 'skipped';
   if (samePush && marker?.state !== 'frozen') {
     try {
-      pushMain(git, store.address, commit, commit, true);
+      pushMain(git, writeOrigin(git, address), commit, commit, true);
       pushNegotiation = 'accepted-dry-run';
     } catch {
       pushNegotiation = 'failed-dry-run';
@@ -109,11 +129,12 @@ function check({ git, readJson, live }) {
 }
 
 function migrate(options, { git, readJson, verifyRuntime, makeCommit, live }) {
-  const { store: source, samePush } = currentOrigin(git);
+  const origin = writeOrigin(git);
+  const source = endpoint(git, origin);
   const target = endpoint(git, options.to);
   const from = options.from;
   requireThat(shaPattern.test(from ?? ''), 'Use --from with the full live main SHA from store check.');
-  requireThat(samePush && git(['config', '--get-all', 'remote.origin.pushurl'], { optional: true }) === null,
+  requireThat(git(['config', '--get-all', 'remote.origin.pushurl'], { optional: true }) === null,
     'Use a checkout with a single origin URL and no separate push URL.');
   requireDirectAddress(git, source);
   requireDirectAddress(git, target);
@@ -123,7 +144,7 @@ function migrate(options, { git, readJson, verifyRuntime, makeCommit, live }) {
     'Use a standalone clone for migration. Linked worktrees share their origin setting.');
 
   const to = fingerprint(target);
-  const head = live({ allowFrozen: true });
+  const head = live({ allowFrozen: true, address: source.address });
   verifyRuntime(head);
   const marker = storeMarker(readJson, head);
   if (source.identity === target.identity) {
@@ -148,6 +169,7 @@ function migrate(options, { git, readJson, verifyRuntime, makeCommit, live }) {
     [storePath]: JSON.stringify({ version: 1, state: 'frozen', from, to }, null, 2) + '\n',
   }, 'Freeze Hars-Mem source for migration');
   if (frozen !== head) {
+    writeOrigin(git, origin);
     requireThat(setMain(git, source.address, frozen, from, 'Source freeze') === frozen,
       'The frozen source advanced. Inspect both stores before retrying.');
   }
@@ -165,9 +187,12 @@ function migrate(options, { git, readJson, verifyRuntime, makeCommit, live }) {
   requireThat(activated?.state === 'active' && activated.from === from && activated.to === to
     && activated.frozen === frozen && ancestor(git, frozen, commit), 'Destination does not contain the verified migration.');
   requireThat(refs(git, source.address).get(mainRef) === frozen, 'Frozen source moved. Inspect both stores before reconnecting.');
-  requireThat(currentOrigin(git).store.identity === source.identity, 'Local origin changed during migration. Verify it before reconnecting.');
+  writeOrigin(git, origin);
+  requireThat(git(['config', '--get-all', 'remote.origin.pushurl'], { optional: true }) === null,
+    'Remove the separate push URL before reconnecting the verified destination.');
   git(['remote', 'set-url', 'origin', target.address]);
-  git(['fetch', '--no-tags', 'origin', '+' + mainRef + ':' + trackingRef]);
+  writeOrigin(git, target.address);
+  storeGit(git, target.address, 'fetch', ['--no-tags'], ['+' + mainRef + ':' + trackingRef]);
   const verified = git(['rev-parse', trackingRef]);
   requireThat(ancestor(git, commit, verified), 'Destination main changed during local reconnection. Inspect origin before using it.');
   requireActive(readJson, verified);

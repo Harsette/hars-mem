@@ -131,6 +131,8 @@ If the client only has a GitHub connector or browser, follow [the hosted handoff
 
 ### Persistent-agent checklist
 
+Give a new persistent agent the [agent starter](AGENT-STARTER.md) core block and snapshot routine at creation, then run these steps.
+
 1. Register from the owner-selected store with a stable ID, known project scope, and the role and capabilities you actually have. Record `canonCommit` and `registrationPath`. The example uses an outer agent for the field-guide project.
 
    ~~~sh

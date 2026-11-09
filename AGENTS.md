@@ -4,7 +4,7 @@ The owner's selected Git store holds current canon. Start and resume from its li
 
 ## Start an agent
 
-- Boot with the owner-assigned ID, role, scope, and capabilities. Check the returned canon commit and registration. Reuse the same ID and scope for a persistent agent and keep private native state in its harness. A reviewed portable snapshot carries reusable craft and source pointers. [Persistent-agent checklist](ONBOARDING.md#persistent-agent-checklist)
+- Boot with the owner-assigned ID, role, scope, and capabilities. Check the returned canon commit and registration. Reuse the same ID and scope for a persistent agent and keep private native state in its harness. A reviewed portable snapshot carries reusable craft and source pointers. [Persistent-agent checklist](ONBOARDING.md#persistent-agent-checklist) A new persistent agent starts from the [agent starter](AGENT-STARTER.md).
 - A fresh chat talking to the owner takes the outer role. A dispatched agent takes the worker role and boots under its own ID. Use the task packet for the approved project, scope, and proof. [Router and Workers](skills/router-and-workers/SKILL.md)
 
 ## Work and hand off

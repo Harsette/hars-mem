@@ -1,6 +1,6 @@
 const keys = ['board', 'holds', 'state', 'projects', 'agents', 'checkpoints', 'snapshots', 'knowledge'];
 export const releasePaths = [
-  '.gitattributes', '.gitignore', 'ADAPT.md', 'AGENTS.md', 'HOSTED.md', 'ONBOARDING.md',
+  '.gitattributes', '.gitignore', 'ADAPT.md', 'AGENT-STARTER.md', 'AGENTS.md', 'HOSTED.md', 'ONBOARDING.md',
   'README.md', 'WORKFLOW.md', 'INGESTION.md', 'examples/ingestion-feed.mjs', 'hars-mem.mjs', 'ingestion.mjs',
   'layout.mjs', 'onboard.mjs', 'paths.json', 'recall.mjs',
   'setup.mjs', 'skills', 'store.mjs',

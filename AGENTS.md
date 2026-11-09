@@ -12,6 +12,7 @@ The owner's selected Git store holds current canon. Start and resume from its li
 - Read the live board, task brief, [holds](holds.json), and relevant project sources. Verify current facts in the system that owns them. Apply the latest authenticated owner decision and keep holds in force until authorized release. Get owner approval before spending, publishing, contacting someone, or speaking on their behalf.
 - A worker runs `start --packet minimal`, checks `ready` and the live lease, and follows the project repo's instructions. Renew the lease with `heartbeat` during long work, use `save` to checkpoint, and release when pausing. The holder finishes with verified evidence. [Work loop](WORKFLOW.md)
 - Report a saved result after readback from the active store. A read-only agent passes an **UNSAVED** draft and its source revision to the authorized writer. [Hosted handoff](HOSTED.md#a-read-only-connector)
+- Lead every report with the result and why, not a caveat; name a risk only when it changes the action. Before shipping a script, loop, or automated task, check for exposed credentials, runaway cost or rate-limit burn, and personal-data leakage, and build the guard in rather than relying on remembering it. When a new method proves out, fold it into the owning skill in the same pass instead of leaving it in a report to be rediscovered.
 
 ## Keep evidence in scope
 

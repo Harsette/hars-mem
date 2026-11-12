@@ -207,9 +207,7 @@ export function ingestion(action, options, dependencies) {
   const allowed = action === 'check' ? ['config'] : ['config', 'occurrence', 'attest'];
   requireThat(['check', 'run'].includes(action) && Object.keys(options).every((key) => allowed.includes(key)),
     'Use ingest check or ingest run. See INGESTION.md.');
-  if (action === 'run') {
-    requireThat(options.attest === 'owner-reviewed' && options.config, 'An owner-reviewed source allowlist is required.');
-  }
+  if (action === 'run') requireThat(options.config && options.attest, 'An owner-reviewed source allowlist is required: run ingest check --config and pass its approval code as --attest.');
   const target = privateOrigin(git);
   const route = { address: target.address, checkTarget: () => {
     const current = privateOrigin(git);
@@ -219,11 +217,16 @@ export function ingestion(action, options, dependencies) {
   const configPath = options.config ? absolute(options.config) : null;
   const selected = configPath ? artifact(configPath, dependencies) : null;
   const sources = selected ? config(selected.value, target) : [];
+  // The approval binds the owner's review to these exact allowlist bytes and this destination, so a literal flag cannot
+  // stand in for a review and a changed allowlist needs a new one.
+  const approval = selected ? hash(JSON.stringify({ target: target.fingerprint, config: selected.fingerprint })) : null;
+  if (action === 'run') requireThat(options.attest === approval,
+    'The approval code does not match this allowlist and destination. Run ingest check --config, review the sources, and pass its approval code as --attest.');
   const lock = join(git(['rev-parse', '--path-format=absolute', '--git-common-dir']), 'hars-mem', 'ingestion.lock');
   if (action === 'check') {
     const commit = live({ address: target.address });
     verifyRuntime(commit);
-    return { target: target.fingerprint, commit, locked: existsSync(lock), lock,
+    return { target: target.fingerprint, commit, locked: existsSync(lock), lock, ...(approval ? { approval } : {}),
       sources: sources.map((source) => {
         try { return { source: source.source, cursor: cursorAt(commit, source, dependencies) }; }
         catch { return { source: source.source, status: 'invalid-cursor' }; }

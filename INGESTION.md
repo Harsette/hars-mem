@@ -11,8 +11,10 @@ Use recurring ingestion when you have a few sources an owner-approved feeder can
 
 ~~~sh
 node hars-mem.mjs ingest check --config "/private/ingestion.json"
-node hars-mem.mjs ingest run --config "/private/ingestion.json" --attest owner-reviewed
+node hars-mem.mjs ingest run --config "/private/ingestion.json" --attest APPROVAL
 ~~~
+
+`ingest check --config` returns an `approval` code: a hash of the allowlist's exact bytes and the destination. The owner reviews that check output and the run passes the code as `--attest`. Change one byte of the allowlist or point the checkout at another store and the code stops matching, so the scheduled run refuses until the owner reviews again. Put the code in the schedule, never a literal word.
 
 The allowlist is version 1. The `target` is the exact value returned by `ingest check`. List up to twelve sources, each with a unique stable `id`, a `harness`, a `scope` such as `project/field-guide`, and a `type` of `connector`, `selected-chat`, or `manual`. Set `kinds` to the allowed reference kinds, `feed` to an absolute file path, and `maxBatches` to 1 through 8. The reference kinds are `skill`, `prompt`, `decision`, `memory`, `open-work`, and `pointer`. Use the [reviewed onboarding workflow](ONBOARDING.md#preview-and-approve) for authority changes and owner-approved canon.
 
@@ -51,10 +53,11 @@ node setup.mjs --local "$LAB/owner.git"
 TARGET=$(node hars-mem.mjs ingest check | node -p "JSON.parse(require('node:fs').readFileSync(0, 'utf8')).target")
 CONFIG="$LAB/feeds/synthetic-config.json"
 node examples/ingestion-feed.mjs "$LAB/feeds" "$TARGET" cold
-node hars-mem.mjs ingest run --config "$CONFIG" --attest owner-reviewed
+APPROVAL=$(node hars-mem.mjs ingest check --config "$CONFIG" | node -p "JSON.parse(require('node:fs').readFileSync(0, 'utf8')).approval")
+node hars-mem.mjs ingest run --config "$CONFIG" --attest "$APPROVAL"
 node examples/ingestion-feed.mjs "$LAB/feeds" "$TARGET" replay
-node hars-mem.mjs ingest run --config "$CONFIG" --attest owner-reviewed
-node hars-mem.mjs ingest run --config "$CONFIG" --attest owner-reviewed
+node hars-mem.mjs ingest run --config "$CONFIG" --attest "$APPROVAL"
+node hars-mem.mjs ingest run --config "$CONFIG" --attest "$APPROVAL"
 node hars-mem.mjs ingest check --config "$CONFIG"
 ~~~
 

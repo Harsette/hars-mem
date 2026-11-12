@@ -4,7 +4,7 @@ A Git-backed second brain for the work your agents share.
 
 I run agents across different chats, tools and machines. I wanted them to start from the same decisions, see who was already working on a task, and leave something the next agent could pick up. So I built one place they can all read and write back to.
 
-**[Set up your brain](ONBOARDING.md)** | [See how work moves](WORKFLOW.md) | [Bring an existing repo](ADAPT.md)
+**[Set up your brain](ONBOARDING.md)** | [See how work moves](WORKFLOW.md) | [Bring an existing repo](ADAPT.md) | [Why it works this way](docs/WHY.md)
 
 ## What lives where
 

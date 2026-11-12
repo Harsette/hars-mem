@@ -1,6 +1,6 @@
 # Why Hars-Mem works the way it does
 
-Hars-Mem lets several agents share one memory without trusting each other's recollection. Each choice below names the failure it prevents, the mechanism that prevents it, and where you see it work.
+Hars-Mem lets several agents share one memory without trusting each other's recollection. Chat memory and vector stores keep what an agent said; Hars-Mem keeps what was decided, who holds the work and what proves it is done, in Git you already trust. Each choice below names the failure it prevents, the mechanism that prevents it, and where you see it work.
 
 ## One source of truth
 
@@ -10,7 +10,7 @@ The owner's selected Git store is canon. Every agent reads it from live main, an
 
 Agents running in different chats, tools and machines each keep their own memory. Without one authority, two agents act on two versions of the same decision, and nobody can tell which one was current.
 
-`node setup.mjs` reports `Verified main at` with the exact commit it read back. `boot` fetches main and returns `canonCommit` and `registrationPath`. `start` fetches main, fast-forwards a clean local main, reopens the updated CLI, and only then claims. Local divergence stops the launch. Every write builds a commit whose parent is the exact main commit it read, and Git accepts the push only while main still points at that parent (`--force-with-lease` in [store.mjs](../store.mjs)). The CLI reads the result back before reporting it. A historical commit serves recovery, and participating clients refuse live reads and writes against a store frozen by `store migrate`. See [WORKFLOW.md](../WORKFLOW.md) and [ONBOARDING.md](../ONBOARDING.md).
+`node setup.mjs` reports `Verified main at` with the exact commit it read back. `boot` fetches main and returns `canonCommit` and `registrationPath`. `start` fetches main, fast-forwards a clean local main, reopens the updated CLI, and only then claims. Local divergence stops the launch. Every write builds a commit whose parent is the exact main commit it read, and Git accepts the push only while main still points at that parent (`--force-with-lease` in [store.mjs](../store.mjs)). The CLI reads the result back before reporting it. Historical commits are for recovery only. Clients refuse live reads and writes against a store frozen by `store migrate`. See [WORKFLOW.md](../WORKFLOW.md) and [ONBOARDING.md](../ONBOARDING.md).
 
 ### Read status live each time you report it
 
@@ -24,7 +24,7 @@ An open or done claim copied forward is how a finished task gets reported as sti
 
 ### Board rows hold status; prose holds the why
 
-Every thing that can change or close gets one task record, and the board is built from those records. Synthesis, checkpoints and notes carry the reasoning. A handoff is a board task that names the next agent.
+Everything that can change or close gets one task record, and the board is built from those records. Synthesis, checkpoints and notes carry the reasoning. A handoff is a board task that names the next agent.
 
 Status written into prose drifts, because nothing forces anyone to update a paragraph when the work moves. A handoff note in prose reaches nobody: no agent is assigned to read it, and nothing on the board says work is waiting.
 
@@ -36,15 +36,15 @@ An agent claims a task before touching it, renews its lease during long work, an
 
 Two agents on one task duplicate the work at best and overwrite each other at worst. An agent that stops without releasing leaves a task that looks owned and is not.
 
-`start` claims and returns `ready` with the live lease. A second claim fails while the first lease is live, with `Live lease held by AGENT through TIME.` The default lease is 15 minutes, and `--ttl` sets it anywhere from 1 second to 4 hours. `heartbeat` extends it. `release` returns an in-progress task to open, with its checkpoint still at a tracked path. The CLI checks the clock before every push and refuses with `Lease expired before push. Read the live task before retrying.` A readback that crosses expiry returns `expiry-crossed-at-readback`, and `start` returns `ready: false` without its packet when the lease is inactive at readback. Review that commit before claiming timely completion.
+`start` claims and returns `ready` with the live lease. A second claim fails while the first lease is live, with `Live lease held by AGENT through TIME.` The default lease is 15 minutes, and `--ttl` sets it anywhere from 1 second to 4 hours. `heartbeat` extends it. `release` returns an in-progress task to open, with its checkpoint still at a tracked path. The CLI checks the clock before every push and refuses with `Lease expired before push. Read the live task before retrying.` A readback that crosses expiry returns `expiry-crossed-at-readback`, and `start` returns `ready: false` without its packet when the lease is inactive at readback. That commit landed after the lease ran out, so review it before reporting the work as on time.
 
 ### Settle zombie claims with a receipt
 
-A lease that is live but whose holder is dead, or any claim held by an agent ID no longer in the active roster, is treated as expired and settled with a receipt.
+A lease that is live but whose holder is dead, or any claim held by an agent ID no longer in the active roster, is flagged as stale before it expires and settled with a receipt.
 
 A dead holder's lease blocks work until it expires, and a retired agent's `doing` tasks never move. Silently relabeling or re-owning them erases the record of what happened to the work.
 
-The [Manager](../skills/hars-mem-manager/SKILL.md) sweep and [Zero Drift](../skills/zero-drift/SKILL.md) step 6 flag a `doing` task with no heartbeat or save in several TTL windows, and any claim held by an ID outside the roster. Each one gets `settle --as done` or `settle --as cancelled` with evidence, never a quiet edit.
+The [Manager](../skills/hars-mem-manager/SKILL.md) sweep and [Zero Drift](../skills/zero-drift/SKILL.md) step 6 flag a `doing` task with no heartbeat or save in several TTL windows, and any claim held by an ID outside the roster. Each one gets `settle --as done`, `cancelled` or `superseded` with evidence, never a quiet edit.
 
 ### Receipts that resolve
 
@@ -70,7 +70,7 @@ An owner approval is a code computed from the exact content the owner reviewed. 
 
 A literal flag anyone can type is not a review. A scheduled job that passes `--attest owner-reviewed` keeps running after its allowlist gains a source nobody looked at.
 
-`onboard preview` returns an `approval` that is the SHA-256 digest of the plan. `onboard apply --approve APPROVAL` refuses with `The preview changed. Prepare and review it again.` when the saved preview no longer hashes to that code. Recurring ingestion now works the same way. `node hars-mem.mjs ingest check --config FILE` prints an `approval` code: a hash of the allowlist's exact bytes and the destination's fingerprint. `ingest run --config FILE --attest CODE` refuses anything else with `The approval code does not match this allowlist and destination. Run ingest check --config, review the sources, and pass its approval code as --attest.` Change one byte of the allowlist, or point the checkout at another store, and the scheduled run stops until the owner reviews again. [tests/acceptance.mjs](../tests/acceptance.mjs) passes the old literal `owner-reviewed` and asserts that refusal. See [INGESTION.md](../INGESTION.md).
+`onboard preview` returns an `approval` that is the SHA-256 digest of the plan. `onboard apply --approve APPROVAL` refuses with `The preview changed. Prepare and review it again.` when the saved preview no longer hashes to that code. Recurring ingestion works the same way. `node hars-mem.mjs ingest check --config FILE` prints an `approval` code: a hash of the allowlist's exact bytes and the destination's fingerprint. `ingest run --config FILE --attest CODE` refuses anything else with `The approval code does not match this allowlist and destination. Run ingest check --config, review the sources, and pass its approval code as --attest.` Change one byte of the allowlist, or point the checkout at another store, and the scheduled run stops until the owner reviews again. [tests/acceptance.mjs](../tests/acceptance.mjs) passes the old literal `owner-reviewed` and asserts that refusal. See [INGESTION.md](../INGESTION.md).
 
 ### Holds and approval before spending, publishing, contacting or speaking for the owner
 
@@ -100,21 +100,21 @@ A method left in a report gets rediscovered, or lost, by the next agent. A skill
 
 ### Cheap checks that actually check
 
-The repo runs fast checks that fail on the problems that cause drift, on a clean machine, on every change.
+The repo has fast checks that fail on the problems that cause drift, and they pass on a clean machine. Run `node --test tests/*.mjs` before every push.
 
 A check that cannot fail is worse than none, because it reads as green. A test that passes only on its author's machine proves nothing to anyone else.
 
-[tests/repo.mjs](../tests/repo.mjs) runs in seconds. It parses each skill's frontmatter strictly and requires `name` to match the folder and a `description` of 300 characters or fewer. It resolves every relative link in every tracked Markdown file. It scans the tracked tree for personal email addresses and for the shapes of GitHub, cloud and chat tokens and private keys. [tests/acceptance.mjs](../tests/acceptance.mjs) sets its own Git author and committer, so it runs on a machine with no `user.name`. [.github/workflows/test.yml](../.github/workflows/test.yml) runs `node --test tests/*.mjs` on every push to main and every pull request.
+[tests/repo.mjs](../tests/repo.mjs) runs in seconds. It parses each skill's frontmatter strictly and requires `name` to match the folder and a `description` of 300 characters or fewer. It resolves every relative link in every tracked Markdown file. It scans the tracked tree for personal email addresses and for the shapes of GitHub, cloud and chat tokens and private keys. [tests/acceptance.mjs](../tests/acceptance.mjs) sets its own Git author and committer, so it runs on a machine with no `user.name`. [.github/workflows/test.yml](../.github/workflows/test.yml) repeats the same run on every push to main and every pull request.
 
 ## Safety and reporting
 
-### Secrets, burns and leaks designed for up front
+### Secrets, runaway cost and leaks guarded up front
 
 Credentials stay out of Git, anything that loops has caps, and nothing personal leaves the private store. The guards are built in, not remembered.
 
 A credential in history is exposed to every reader of every clone. An unbounded loop burns money and rate limits while nobody watches. A private brain pushed to a public repo is a leak no revert recalls.
 
-Setup verifies a GitHub store's identity and private visibility through the GitHub API and refuses with `Choose a private GitHub repository.` `privateOrigin` in [store.mjs](../store.mjs) reruns that check before onboarding and ingestion touch the store, and the public starter refuses outright: `The public starter cannot be the private store.` Onboarding redacts common credential patterns and requires plain-text fields. Receipt URLs and live source pointers must be credential-free. Ingestion caps an allowlist at twelve sources, `maxBatches` at 8, a feed at sixteen batches and 128 KiB, and retained raw chat at 512 KiB kept outside Git. A guarded write makes at most five attempts against live main. A feeder's access check expires after 24 hours. Before shipping a script, loop or scheduled task, check it for exposed credentials, runaway cost and personal-data leakage, and build the guard into it.
+Setup verifies a GitHub store's identity and private visibility through the GitHub API and refuses with `Choose a private GitHub repository.` `privateOrigin` in [store.mjs](../store.mjs) reruns that check before onboarding and ingestion touch the store, and the public starter refuses outright: `The public starter cannot be the private store.` Onboarding redacts common credential patterns and requires plain-text fields. Receipt URLs and live source pointers must be credential-free. Ingestion caps an allowlist at 12 sources, `maxBatches` at 8, a feed at 16 batches and 128 KiB, and retained raw chat at 512 KiB kept outside Git. A guarded write makes at most five attempts against live main. A feeder's access check expires after 24 hours. Before shipping a script, loop or scheduled task, check it for exposed credentials, runaway cost and personal-data leakage, and build the guard into it.
 
 ### Reports lead with the result and the reason
 

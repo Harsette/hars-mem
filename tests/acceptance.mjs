@@ -12,11 +12,18 @@ const taskId = 'field-guide/review';
 const taskGoal = 'Review the field guide.';
 const taskDoneWhen = 'The revised guide is checked against the source and saved.';
 
+// Tests commit in throwaway repos, so they carry their own identity instead of depending on the machine's git config.
+const testIdentity = {
+  GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME || 'Hars-Mem Test', GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL || 'hars-mem-test@example.invalid',
+  GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME || 'Hars-Mem Test', GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL || 'hars-mem-test@example.invalid',
+};
+
 function git(cwd, args) {
   const result = spawnSync('git', args, {
     cwd,
     encoding: 'utf8',
     windowsHide: true,
+    env: { ...process.env, ...testIdentity },
   });
   if (result.status !== 0) {
     throw new Error(`git ${args.join(' ')} failed in ${cwd}:\n${result.stderr || result.stdout}`);
@@ -28,7 +35,7 @@ function runProcess(command, args, cwd) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      env: { ...process.env, ...testIdentity, GIT_TERMINAL_PROMPT: '0' },
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -110,7 +117,7 @@ test('recurring ingestion replays selected feeds and verifies private cursor wri
   const feeds = path.join(temp, 'feeds');
   const alternate = path.join(temp, 'alternate.git');
   const config = path.join(feeds, 'synthetic-config.json');
-  const schedule = ['run', '--config', config, '--attest', 'owner-reviewed', '--occurrence'];
+  let schedule;
   const occurrence = '2020-01-08T22:00:00Z';
   const head = () => git(temp, ['--git-dir', origin, 'rev-parse', 'main']);
   const ingest = (...args) => runCli(seed, 'ingest', ...args);
@@ -132,6 +139,10 @@ test('recurring ingestion replays selected feeds and verifies private cursor wri
     await feeder('cold');
     const before = await ingest('check', '--config', config);
     assert.ok(before.sources.every(({ cursor }) => cursor === null));
+    assert.match(before.approval, /^[a-f0-9]{64}$/);
+    const literal = await runCliExpectFailure(seed, 'ingest', 'run', '--config', config, '--attest', 'owner-reviewed', '--occurrence', occurrence);
+    assert.match(literal.stderr, /approval code does not match/);
+    schedule = ['run', '--config', config, '--attest', before.approval, '--occurrence'];
     await mkdir(path.dirname(before.lock), { recursive: true });
     await writeFile(before.lock, JSON.stringify({ pid: process.pid, occurrence }), { flag: 'wx' });
     assert.equal((await ingest(...schedule, occurrence)).status, 'overlap');

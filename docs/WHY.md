@@ -44,7 +44,7 @@ A lease that is live but whose holder is dead, or any claim held by an agent ID 
 
 A dead holder's lease blocks work until it expires, and a retired agent's `doing` tasks never move. Silently relabeling or re-owning them erases the record of what happened to the work.
 
-The [Manager](../skills/hars-mem-manager/SKILL.md) sweep and [Zero Drift](../skills/zero-drift/SKILL.md) step 6 flag a `doing` task with no heartbeat or save in several TTL windows, and any claim held by an ID outside the roster. Each one gets `settle --as done`, `cancelled` or `superseded` with evidence, never a quiet edit.
+The [Manager](../skills/hars-mem-manager/SKILL.md) sweep and [Zero Drift](../skills/zero-drift/SKILL.md) step 6 flag a `doing` task with no heartbeat or save in several TTL windows, and any claim held by an ID outside the roster. Each one gets `settle --as done` or `settle --as cancelled` with evidence, never a quiet edit. Work replaced by a newer task settles as `cancelled`, with the newer task's record as its receipt.
 
 ### Receipts that resolve
 

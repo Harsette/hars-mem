@@ -16,7 +16,7 @@ A second claim for the same task fails while the first lease is live. The defaul
 
 ## Save and hand off
 
-Create a UTF-8 draft.md with the current working text and save it with a next step.
+Create a UTF-8 draft.md (nonempty, at most 512 KiB) with the current working text and save it with a next step. The store keeps it under the task's checkpoints, named from the revision and your file name, such as `r3-draft.md`.
 
 ~~~sh
 node hars-mem.mjs heartbeat your-project/first-task --agent desk-agent

@@ -12,6 +12,7 @@ Run with [HarsBench](../harsbench/SKILL.md) and grade as the [compounding standa
 | 2026-11-13 | A stock number had several writers and no reconciler and drifted one way: 26 items understated by 519 units. | Stock reconciliation, 13 Nov 2026 | Yes if every register and number names its one writer and one reconciler at its top. | open |
 | 2026-11-13 | A lesson was saved where the agent did not read it before the task, and a fresh chat did not apply it. | Learning test, 13 Nov 2026 | Yes if the agent's instructions name the exact file it reads before that kind of task and a fresh chat applies the lesson unprompted. | open |
 | 2026-11-14 | The nightly read only today's and yesterday's inbox, so lessons from a longer outage were never placed. | Brain landscape review, 14 Nov 2026 | Yes if the nightly reads every inbox file dated since its last completed run and a three-night gap leaves no unplaced line. | open |
+| 2026-11-14 | Four cold runs of this skill: the brain text mixed with the report carried tool claims; the nightly writer had no agent row; the skill's own home table gave raw originals and mirrors no reconciler; proposed schedules carried no tag. Each line was fixed and the next run passed that item. | Cold runs 1 to 4, 14 Nov 2026 | Yes if a fresh run puts brain text under its own heading, gives every agent including the writer a row, names a reconciler for every home-table row, and tags each proposed value. | open |
 | 2026-11-04 | Claims about what an AI tool or connector can or cannot do were written into brain files agents read. | Brain review, 4 Nov 2026 | Yes if no brain file states what an AI tool, host or connector can or cannot do. | open |
 
 ## Checklist
@@ -19,7 +20,7 @@ Run with [HarsBench](../harsbench/SKILL.md) and grade as the [compounding standa
 Grade one run's output (the brain design or audit, plus its report). Each item is yes or no, with the words that prove it.
 
 1. Yes if every changeable fact it states (the writer, a schedule, a check result, a window or cap) carries its read time and a path or commit, or is tagged proposed, not checked.
-2. Yes if every agent that touches the brain, the nightly writer included, has exactly one row saying where its skills live, proven by a live-configuration read-back, before any layout.
+2. Yes if every agent that touches the brain, the nightly writer included, has exactly one row saying where its skills live, proven by a live-configuration read-back or, before the agents exist, marked not checked with who reads it back and when, before any layout.
 3. Yes if it gives a store table with each store's readers and contents, and no audience shares a store with a narrower one.
 4. Yes if the brain text sits under its own heading and none of it says what an AI tool, host or connector can or cannot do.
 5. Yes if customer state is one dated page per customer with owner, commitments, open items and next meeting, and other files only link to it.
@@ -44,3 +45,7 @@ Grade one run's output (the brain design or audit, plus its report). Each item i
 
 | Date | Task | Runner | Grader | Score | Receipt |
 |---|---|---|---|---|---|
+| 2026-11-14 | T1 | DeepSeek V4.1 Flash, cold, read-only | Haiku blind grader | 7.7/10 (key yes; items 2, 4, 11 failed) | SKILL.md blob a02c133b037ee710c3fabab47ad115b2c1fe2027; record kept by the maintainer |
+| 2026-11-14 | T1 | DeepSeek V4.1 Flash, cold, read-only | Haiku blind grader | 8.5/10 (key yes; items 6, 9 failed) | SKILL.md blob 8c2d871c57b593108d0206fb222ff06cd1431682; record kept by the maintainer |
+| 2026-11-14 | T1 | DeepSeek V4.1 Flash, cold, read-only | Haiku blind grader | 9.2/10 (key yes; item 1 failed) | SKILL.md blob d25e8a66a7c09488ae6255b0f7c01759f3b6ba41; record kept by the maintainer |
+| 2026-11-14 | T1 | DeepSeek V4.1 Flash, cold, read-only | Haiku blind grader | 9.2/10 (key yes; item 2 failed: a read-back cannot exist before the agents do, item now allows not checked with reader and date, not yet re-proven) | SKILL.md blob 07290ac8598d3a1db6f63971c98a6026165aa1cc; record kept by the maintainer |

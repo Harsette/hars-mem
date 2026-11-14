@@ -54,3 +54,30 @@ test('the public tree carries no personal email, key or token', () => {
     for (const shape of secrets) assert.ok(!shape.test(text), `${file}: matches a secret shape ${shape}`);
   }
 });
+
+test('every skill on the compounding standard passes its scripted checks', async () => {
+  const { checkSkill, passes } = await import('../skill-check.mjs');
+  const onStandard = readdirSync(join(root, 'skills'))
+    .filter((dir) => existsSync(join(root, 'skills', dir, 'evals.md')))
+    .map((dir) => checkSkill(join(root, 'skills', dir)));
+  assert.ok(onStandard.length >= 2, 'expected at least two skills on the standard');
+  for (const result of onStandard) assert.ok(passes(result), `${result.skill}: ${result.why.join('; ')}`);
+});
+
+test('the skill check fails a skill whose evals lost their checklist', async () => {
+  const { mkdtempSync, writeFileSync, mkdirSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { checkSkill, passes } = await import('../skill-check.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'skill-check-'));
+  try {
+    const skill = join(dir, 'broken');
+    mkdirSync(skill);
+    writeFileSync(join(skill, 'SKILL.md'), '---\nname: broken\ndescription: "A fixture."\n---\n\n## Learning loop\n\nRows go to evals.md Regressions; a fresh session proves it; see compounding.md.\n');
+    writeFileSync(join(skill, 'evals.md'), '## Regressions\n\n| Date | Failure | Evidence | Check | Status |\n|---|---|---|---|---|\n| 2026-01-01 | a | b | Yes if c | open |\n');
+    const result = checkSkill(skill);
+    assert.ok(!passes(result), 'a skill with one regression row and no checklist must fail');
+    assert.ok(result.why.some((line) => line.startsWith('C3')) && result.why.some((line) => line.startsWith('C4')), result.why.join('; '));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

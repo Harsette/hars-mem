@@ -59,7 +59,7 @@ try {
   writeOrigin(git, origin ?? url);
   storeGit(git, url, 'fetch', ['--no-tags'], [branch + ':refs/remotes/origin/main']);
   git(['branch', '--set-upstream-to=origin/main', 'main']);
-  process.stdout.write('Verified main at ' + head + '. Give agents the repository URL and "Read ONBOARDING.md".\n');
+  process.stdout.write('Verified main at ' + head + '. Give agents the repository URL or path and "Read ONBOARDING.md".\n');
 } catch (error) {
   process.stderr.write(error.message.replace(/(https?:\/\/)[^\s/@]+@/gi, '$1[redacted]@') + '\n');
   process.exitCode = 1;

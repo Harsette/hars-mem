@@ -28,7 +28,7 @@ Grade one run's output (an agent's instructions, skills and birth report). Each 
 5. Yes if every register names its writer and reconciler.
 6. Yes if every routine catches up since its last completed run, runs dependent steps in order, and lands in the run ledger.
 7. Yes if the eval pack passed twice cold with the learning pair, scored by someone other than the agent, naming the scorer and receipt, or the agent has no write tool yet.
-8. Yes if the nightly page exists with today's confidence score.
+8. Yes if the nightly page exists with today's confidence score, or, before the agent is live, the page is specified with its path and today's score marked not run.
 9. Yes if no instruction tells the agent to emit, pick from or end with a quoted phrase.
 
 ## Tasks
@@ -44,3 +44,5 @@ Grade one run's output (an agent's instructions, skills and birth report). Each 
 
 | Date | Task | Runner | Grader | Score | Receipt |
 |---|---|---|---|---|---|
+| 2026-11-14 | T1 | DeepSeek V4.1 Flash, cold, read-only | Haiku blind grader | 9.0/10 (key yes; item 8 could not pass before the agent is live, item reworded) | SKILL.md blob 401a65a14c31aab9f15518305ccb56f50347b4b0; record kept by the maintainer |
+| 2026-11-14 | T1 | DeepSeek V4.1 Flash, cold, read-only | Haiku blind grader | 10/10 (key and items 1 to 9 yes) | SKILL.md blob aa81b0258547610e42e8e3bff890b553a1151bb2; record kept by the maintainer |

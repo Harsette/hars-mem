@@ -2,7 +2,7 @@
 
 ## Create the owner's blank workspace
 
-Install Git and Node.js 20 or newer. Use a source archive or clone the starter with its remote named `starter`. That leaves `origin` available for your chosen store.
+Install Git and Node.js 20 or newer. Use a source archive or clone the starter with its remote named `starter`. That leaves `origin` available for your chosen store. If your checkout already calls the starter `origin`, run `git remote rename origin starter` before setup.
 
 ~~~sh
 git clone --origin starter https://github.com/Harsette/hars-mem.git hars-mem
@@ -21,7 +21,7 @@ For a local store, create an empty bare Git repository with `git init --bare --i
 node setup.mjs --local "/absolute/path/to/your-brain.git"
 ~~~
 
-Setup reports `Verified main at` and the exact commit it read back. That repository is the owner's authority. It starts with empty tasks and holds, and a layout for projects, knowledge, agent registrations, checkpoints, and snapshots. Use [the folder map](ADAPT.md) for an existing repository and [the store switch](skills/hars-mem-manager/SKILL.md#switch-the-canonical-store) to move an installed workspace.
+Setup reports `Verified main at` and the exact commit it read back. That repository is the owner's authority. It starts with the starter's files and history, empty tasks and holds, and a layout for projects, knowledge, agent registrations, checkpoints, and snapshots. Use [the folder map](ADAPT.md) for an existing repository and [the store switch](skills/hars-mem-manager/SKILL.md#switch-the-canonical-store) to move an installed workspace.
 
 ## Bring over one project
 
@@ -114,7 +114,7 @@ Use a UTC date you can substantiate, or leave the item out and record the gap in
 
 If the owner wants to revisit the same approved sources on a cadence, set up [recurring ingestion](INGESTION.md) after the first private import.
 
-Give the agent the **owner's repository URL or path** and say “Read ONBOARDING.md.” A shell agent with write access clones that repository. Run these commands from the checkout. Choose the agent ID, role, scope, and capabilities that match the runtime.
+Give the agent the **owner's repository URL or path** and say “Read ONBOARDING.md.” A shell agent with write access clones that repository; the checkout setup just connected to the store works too, since its `origin` is now the store. Run these commands from the checkout. Choose the agent ID, role, scope, and capabilities that match the runtime.
 
 ~~~sh
 node hars-mem.mjs store check
@@ -122,7 +122,7 @@ node hars-mem.mjs boot --agent desk-agent --role outer --scope all --capabilitie
 node hars-mem.mjs board
 ~~~
 
-`store check` identifies the authority and reports the result of the push negotiation. A successful negotiation is a preflight; a saved registration or task write with readback proves write access. Boot fetches current main, uses the current rules, and returns `canonCommit`, `registrationPath`, and the first task in scope, if one exists. An empty workspace returns `task: null` and `tasks: []`.
+`store check` identifies the authority and reports the result of the push negotiation. A successful negotiation is a preflight; a saved registration or task write with readback proves write access. Boot fetches current main, uses the current rules, and returns `canonCommit`, `registrationPath`, and the first task in scope, if one exists. An empty workspace returns `task: null` and `tasks: []`. Boot also writes the agent's registration to main as its own commit, returned as `commit`, so `registrationPath` reads back at that commit, newer than `canonCommit`. `task` is the first open task in the agent's scope, so it is `null` until a task exists in that scope, even in a store with other work.
 
 - **Persistent agent.** Use the [checklist below](#persistent-agent-checklist) to keep the same identity and verify what carries across contexts.
 - **Fresh chat.** Start from the selected repository and this page. Use the existing stable ID if the owner assigned the same role, or a new ID for a different role. Read the live board and the relevant brief, then resume from the written checkpoint. A chat talking to the owner takes the outer role; a dispatched agent takes the worker role. The task and receipt come from the store.
@@ -153,6 +153,10 @@ Give a new persistent agent the [agent starter](AGENT-STARTER.md) core block and
 
 Use [Router and Workers](skills/router-and-workers/SKILL.md) to dispatch independent work, [Hars Flags](skills/hars-flags/SKILL.md) to track verified failures, [Skill Creator](skills/skill-creator/SKILL.md) to revise a method, and [HarsBench](skills/harsbench/SKILL.md) to test a material change.
 
-Create a project synthesis and its `SOURCES.json` using [the source map format](ADAPT.md#link-project-sources). Review those files and save them in the owner-selected store. Then file the first task through the [Manager](skills/hars-mem-manager/SKILL.md), which covers claims, checkpoints, inner-repo handoffs, and receipts.
+Create a project synthesis and its `SOURCES.json` using [the source map format](ADAPT.md#link-project-sources). Review those files, commit them to the owner-selected store's main from a clean clone under the agent's own identity, and read the commit back with `git show COMMIT:PATH`. A first test task can skip them. Then file the first task through the [Manager](skills/hars-mem-manager/SKILL.md), which covers claims, checkpoints, inner-repo handoffs, and receipts:
+
+~~~sh
+node hars-mem.mjs add your-project/first-task --agent desk-agent --goal "What the task achieves" --done-when "What proves it is done"
+~~~
 
 On resume, boot again with the same ID. If a tracked edit or divergence blocks the fast-forward, preserve it on a work branch and reconcile. If the authority is unavailable, record the last commit as historical and preserve pending input.

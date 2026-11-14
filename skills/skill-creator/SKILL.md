@@ -10,6 +10,7 @@ description: Turn a repeatable workflow with evidence into one portable skill, i
 3. Keep approved raw evidence with its source owner, with bytes or a digest and source permissions. Keep dated claims in cards, current conclusions in a project synthesis, work status in task records, and reusable method in the skill. Link these with stable IDs. Share only the pointers the next agent needs.
 4. Check exact answers first. Verify unique IDs, parseable dates and front matter, source paths and revisions, and hashes where available. Use the smallest suitable model only for an ambiguous comparison. Give it the specific claims and sources. The domain owner resolves authority and approves changes to canon.
 5. Compare the skill against the same task without it. Include a held-out case and a case that should stop or route elsewhere. Save commands, outcomes, and failures. Revise or retire a skill that adds steps without improving the result.
+6. Put a skill that others rely on onto the [compounding standard](compounding.md): an `evals.md` with its regressions, an output checklist and tasks, a learning loop in the skill, and `node skill-check.mjs SKILL` passing. Every later failure lands there as a row, so a fix is never lost.
 
 ## When the owner liked a run and does not know why
 

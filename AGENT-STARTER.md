@@ -1,6 +1,6 @@
 # Start a persistent agent
 
-A persistent agent is always on and owns one job. Give it this block at creation so it knows the store, its domain, the write route, and its limits from its first turn, without the owner repeating them. Fill every field from the owner's approved setup. Mark unavailable capabilities and pending permissions explicitly. Nothing in angle brackets survives setup. Fill every field before you paste: some agent builders read an angle-bracket word as markup and drop it on the next publish, so a half-filled block silently loses words. Read the saved instructions back after every publish.
+A persistent agent is always on and owns one job. Give it this block at creation so it knows the store, its domain, the write route, and its limits from its first turn, without the owner repeating them. Fill every field from the owner's approved setup. Mark unavailable capabilities and pending permissions explicitly. Nothing in angle brackets survives setup. Fill every field before you paste: some agent builders read an angle-bracket word as markup and drop it on the next publish, so a half-filled block silently loses words. Read the saved instructions back after every publish. An agent that works in an owner's business systems also carries the [agent kit](skills/agent-kit/SKILL.md): its core block, skills with the learning loop inside, and an eval pack scored by someone other than the agent.
 
 ## Core block
 

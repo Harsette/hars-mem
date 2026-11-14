@@ -23,7 +23,7 @@ Grade one run's output (the brain design or audit, plus its report). Each item i
 3. Yes if it gives a store table with each store's readers and contents, and no audience shares a store with a narrower one.
 4. Yes if the brain text sits under its own heading and none of it says what an AI tool, host or connector can or cannot do.
 5. Yes if customer state is one dated page per customer with owner, commitments, open items and next meeting, and other files only link to it.
-6. Yes if every register and number has its writer and reconciler, and every stored decision names whose authority it is.
+6. Yes if every register, number and row of the one-home table, raw originals and mirrors included, has its writer and reconciler, and every stored decision names whose authority it is.
 7. Yes if it names exactly one nightly writer with identity, time and zone, catching up since its last completed run.
 8. Yes if its read plan says one day per call, 25 a page with the cursor, no recursive tree, one retry at half the window, and a cut read written partial.
 9. Yes if the morning refresh follows the trust order and mirrors are compared with live configuration after every instruction change.

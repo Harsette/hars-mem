@@ -18,7 +18,7 @@ Run with [HarsBench](../harsbench/SKILL.md) and grade as the [compounding standa
 
 Grade one run's output (the brain design or audit, plus its report). Each item is yes or no, with the words that prove it.
 
-1. Yes if every changeable fact it states (the writer, a schedule, a check result) carries its read time and a path or commit, or is marked not checked.
+1. Yes if every changeable fact it states (the writer, a schedule, a check result, a window or cap) carries its read time and a path or commit, or is tagged proposed, not checked.
 2. Yes if every agent that touches the brain, the nightly writer included, has exactly one row saying where its skills live, proven by a live-configuration read-back, before any layout.
 3. Yes if it gives a store table with each store's readers and contents, and no audience shares a store with a narrower one.
 4. Yes if the brain text sits under its own heading and none of it says what an AI tool, host or connector can or cannot do.

@@ -44,3 +44,5 @@ Grade one run's output (an agent's instructions, skills and birth report). Each 
 
 | Date | Task | Runner | Grader | Score | Receipt |
 |---|---|---|---|---|---|
+| 2026-11-14 | T1 | DeepSeek V4.1 Flash, cold, read-only | Haiku blind grader | 9.0/10 (key yes; item 8 could not pass before the agent is live, item reworded) | SKILL.md blob 401a65a14c31aab9f15518305ccb56f50347b4b0; record kept by the maintainer |
+| 2026-11-14 | T1 | DeepSeek V4.1 Flash, cold, read-only | Haiku blind grader | 10/10 (key and items 1 to 9 yes) | SKILL.md blob aa81b0258547610e42e8e3bff890b553a1151bb2; record kept by the maintainer |

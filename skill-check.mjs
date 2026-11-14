@@ -91,7 +91,9 @@ export function checkSkill(dir) {
   const results = tableRows(section(evals, 'Results')).slice(1).filter((cells) => /^\d{4}-\d{2}-\d{2}$/.test(cells[0] || ''));
   let blob = '';
   try { blob = execFileSync('git', ['hash-object', skillFile], { encoding: 'utf8' }).trim(); } catch { blob = ''; }
-  const newest = results.sort((a, b) => b[0].localeCompare(a[0]))[0];
+  // Newest is the last row of the latest date: rows are appended, so a later run on the same day sits lower.
+  const latest = results.reduce((max, cells) => (cells[0] > max ? cells[0] : max), '');
+  const newest = results.filter((cells) => cells[0] === latest).pop();
   r.C7 = Boolean(newest && blob && newest.join(' ').includes(blob) && newest[2] && newest[3] && newest[2] !== newest[3]);
   if (!r.C7) why.push(newest ? 'C7: the newest result did not run against today\'s SKILL.md, or names no separate grader' : 'C7: no dated result yet');
 

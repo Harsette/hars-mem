@@ -717,7 +717,8 @@ const commands = {
 };
 
 try {
-  const [command = 'help', ...args] = process.argv.slice(2);
+  const [given = 'help', ...args] = process.argv.slice(2);
+const command = ['--help', '-h'].includes(given) ? 'help' : given;
   requireThat(Object.hasOwn(commands, command), 'Unknown command. Run node hars-mem.mjs help.');
   const { id, options } = parse(args);
   requireThat(options['as-of'] === undefined || ['board', 'brief', 'check', 'recall'].includes(command),

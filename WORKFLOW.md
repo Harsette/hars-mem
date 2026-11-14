@@ -10,7 +10,7 @@ node hars-mem.mjs brief your-project/first-task
 node hars-mem.mjs start your-project/first-task --agent desk-agent
 ~~~
 
-**Start** fetches main, fast-forwards a clean local main if needed, reopens the updated CLI, and then claims and returns live rules and the task packet. Local divergence or tracked edits that prevent the update stop the launch. Save those edits on a work branch and retry from clean main.
+**Start** fetches main, fast-forwards a clean local main if needed, reopens the updated CLI, and then claims and returns live rules and the task packet. Local divergence or tracked edits that prevent the update stop the launch. Save those edits on a work branch and retry from clean main. Start updates your checkout once, at launch; later saves move the store's main, not your checkout, so read saved work by the commit each command returns.
 
 A second claim for the same task fails while the first lease is live. The default lease is 15 minutes. Renew before expiry during long work. A Git checkout keeps its claim token across process restarts. Release or wait for expiry before resuming from another checkout.
 

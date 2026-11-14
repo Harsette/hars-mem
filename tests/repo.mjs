@@ -81,3 +81,9 @@ test('the skill check fails a skill whose evals lost their checklist', async () 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+test('--help and -h print the command list a new user looks for first', () => {
+  for (const flag of ['--help', '-h']) {
+    const out = execFileSync(process.execPath, ['hars-mem.mjs', flag], { cwd: root, encoding: 'utf8' });
+    assert.equal(JSON.parse(out).guide, 'ONBOARDING.md', `${flag} should print the help JSON`);
+  }
+});

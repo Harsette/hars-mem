@@ -19,16 +19,16 @@ Run with [HarsBench](../harsbench/SKILL.md) and grade as the [compounding standa
 Grade one run's output (the brain design or audit, plus its report). Each item is yes or no, with the words that prove it.
 
 1. Yes if every changeable fact it states (the writer, a schedule, a check result) carries its read time and a path or commit, or is marked not checked.
-2. Yes if every agent that touches the brain has exactly one row saying where its skills live, proven by a live-configuration read-back, before any layout.
+2. Yes if every agent that touches the brain, the nightly writer included, has exactly one row saying where its skills live, proven by a live-configuration read-back, before any layout.
 3. Yes if it gives a store table with each store's readers and contents, and no audience shares a store with a narrower one.
-4. Yes if no text it proposes for the brain says what an AI tool, host or connector can or cannot do.
+4. Yes if the brain text sits under its own heading and none of it says what an AI tool, host or connector can or cannot do.
 5. Yes if customer state is one dated page per customer with owner, commitments, open items and next meeting, and other files only link to it.
 6. Yes if every register and number has its writer and reconciler, and every stored decision names whose authority it is.
 7. Yes if it names exactly one nightly writer with identity, time and zone, catching up since its last completed run.
 8. Yes if its read plan says one day per call, 25 a page with the cursor, no recursive tree, one retry at half the window, and a cut read written partial.
 9. Yes if the morning refresh follows the trust order and mirrors are compared with live configuration after every instruction change.
 10. Yes if it names the brain check and the path its result lands at.
-11. Yes if the proof is a fresh agent's run read back with score, transcript path and commit, and the learning pair is reported the same way.
+11. Yes if the proof names its runner and grader and is a fresh agent's run read back with score, transcript path and commit, with the learning pair reported the same way; or, before anything can run, both are named with a date.
 12. Yes if it ends with the receipt, or the one blocker and who owns it.
 
 ## Tasks

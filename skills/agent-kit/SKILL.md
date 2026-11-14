@@ -132,7 +132,7 @@ A rule in the instructions is a request. Switching an action off in the tool sto
 5. Every register names its writer and reconciler.
 6. Routines catch up since their last completed run, run dependent steps in order, and land in the run ledger.
 7. The eval pack passed twice cold with the learning pair, scored by someone else, with the scorer and receipt named; or the agent has no write tool yet.
-8. The nightly page exists with today's confidence score.
+8. The nightly page exists with today's confidence score, or, before the agent is live, its path is set and today's score is marked not run.
 9. No instruction tells the agent to emit, pick from or end with a quoted phrase; the owner's sample phrases are examples of intent, not text to send.
 
 ## Learning loop

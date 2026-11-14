@@ -28,7 +28,7 @@ Grade one run's output (an agent's instructions, skills and birth report). Each 
 5. Yes if every register names its writer and reconciler.
 6. Yes if every routine catches up since its last completed run, runs dependent steps in order, and lands in the run ledger.
 7. Yes if the eval pack passed twice cold with the learning pair, scored by someone other than the agent, naming the scorer and receipt, or the agent has no write tool yet.
-8. Yes if the nightly page exists with today's confidence score.
+8. Yes if the nightly page exists with today's confidence score, or, before the agent is live, the page is specified with its path and today's score marked not run.
 9. Yes if no instruction tells the agent to emit, pick from or end with a quoted phrase.
 
 ## Tasks
